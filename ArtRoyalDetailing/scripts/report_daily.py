@@ -10,7 +10,24 @@ CLICKHOUSE_PASSWORD = "ТУТ_ПАРОЛЬ"
 CLICKHOUSE_DB = "default_db"
 
 CLIENT_ID = 1  # artroyal_detailing
-SQL_DIR = Path(__file__).parent / "sql"
+SQL_DIR = Path(__file__).resolve().parent.parent / "sql" / "daily_report"
+
+COMMUNICATIONS_MAP = {
+    "звонок": ("📞", "Звонки"),
+    "звонки": ("📞", "Звонки"),
+    "call": ("📞", "Звонки"),
+    "telephone": ("📞", "Звонки"),
+    "telegram": ("💬", "telegram"),
+    "tg": ("💬", "telegram"),
+    "whatsapp": ("💬", "whatsapp"),
+    "wa": ("💬", "whatsapp"),
+    "avito": ("💬", "avito"),
+    "instagram": ("💬", "instagram"),
+    "insta": ("💬", "instagram"),
+    "вконтакте": ("💬", "вконтакте"),
+    "vk": ("💬", "вконтакте"),
+    "заявка с сайта": ("🌐", "заявка с сайта"),
+}
 
 
 # ===== ВСПОМОГАТЕЛЬНОЕ =====
@@ -24,6 +41,22 @@ def nvl(value, default=0):
 
 def money(value: int) -> str:
     return f"{int(value):,}".replace(",", " ")
+
+def normalize_comm_label(raw: str) -> tuple[str, str]:
+    raw = (raw or "").strip().lower()
+    if not raw:
+        return "💬", "прочее"
+    if "заявка" in raw and "сайт" in raw:
+        return COMMUNICATIONS_MAP["заявка с сайта"]
+    for key, label in COMMUNICATIONS_MAP.items():
+        if raw == key:
+            return label
+    return "💬", raw
+
+def format_comm_line(label: str, cnt: int) -> str:
+    emoji, title = normalize_comm_label(label)
+    suffix = " заявок" if title == "заявка с сайта" else ""
+    return f"{emoji} {title} — {cnt}{suffix}"
 
 
 # ===== ОСНОВНАЯ ЛОГИКА =====
@@ -65,7 +98,7 @@ def build_daily_report(client_id: int) -> str:
     # Коммуникации
     comm_lines = []
     for source, cnt in comm_rows:
-        comm_lines.append(f"• {source} — {cnt}")
+        comm_lines.append(format_comm_line(source, cnt))
     if not comm_lines:
         comm_lines.append("— данных нет")
 
@@ -90,32 +123,3 @@ def build_daily_report(client_id: int) -> str:
 
     if not reasons_lines:
         reasons_lines.append("— нет данных")
-
-    # Потенциально недополучено
-    lost_sum_str = f"~{money(lost_sum)} ₽" if lost_sum > 0 else "—"
-    unknown_budget_line = ""
-    if unknown_budget_cnt > 0:
-        unknown_budget_line = f"\nКол-во сделок с неизвестным бюджетом — {unknown_budget_cnt}"
-
-    # ===== ИТОГОВЫЙ ТЕКСТ =====
-    report = (
-        f"📊 Отчёт за {date_str}\n\n"
-        f"Коммуникации:\n"
-        + "\n".join(comm_lines)
-        + "\n\n"
-        f"Продажи (amoCRM):\n"
-        f"✅ Успешно — {won_cnt} сделок на {money(won_sum)} ₽\n"
-        f"❌ Нереализовано — {lost_cnt} сделок\n\n"
-        f"Потенциально недополучено:\n"
-        f"💸 {lost_sum_str}"
-        f"{unknown_budget_line}\n\n"
-        f"Причины отказов:\n"
-        + "\n".join(reasons_lines)
-    )
-
-    return report
-
-
-# ===== ЗАПУСК =====
-if __name__ == "__main__":
-    print(build_daily_report(CLIENT_ID))
