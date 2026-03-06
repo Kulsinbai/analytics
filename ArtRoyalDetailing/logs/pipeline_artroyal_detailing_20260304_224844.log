@@ -1,0 +1,11 @@
+[2026-03-04 22:48:44] Старт пайплайна для клиента 'artroyal_detailing'. Лог-файл: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/logs/pipeline_artroyal_detailing_20260304_224844.log
+[2026-03-04 22:48:44] ##### Запуск пайплайна справочников для клиента: artroyal_detailing (id=1) #####
+[2026-03-04 22:48:44] === START: Справочники: шаг 1/4 — выгрузка причин потерь из amoCRM ===
+[2026-03-04 22:48:44] Команда: scripts/export_loss_reasons.py
+[2026-03-04 22:48:44] [stderr] Traceback (most recent call last):
+[2026-03-04 22:48:44] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/scripts/export_loss_reasons.py", line 5, in <module>
+[2026-03-04 22:48:44] [stderr]     from scripts.amocrm_client import get_valid_access_token, get_json, AmoClientError
+[2026-03-04 22:48:44] [stderr] ModuleNotFoundError: No module named 'scripts'
+[2026-03-04 22:48:44] ✖ Шаг 'Справочники: шаг 1/4 — выгрузка причин потерь из amoCRM' завершился с ошибкой, код=1, время=0.0 c
+[2026-03-04 22:48:44] ✖ Пайплайн завершился с ошибкой: Step failed: Справочники: шаг 1/4 — выгрузка причин потерь из amoCRM
+[2026-03-04 22:48:44] Итоговое время выполнения (c ошибкой): 0.0 c

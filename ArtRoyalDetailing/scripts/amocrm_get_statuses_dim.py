@@ -1,7 +1,7 @@
 import json
 import csv
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 
 CLIENT_SLUG = "artroyal_detailing"
 
@@ -24,7 +24,7 @@ def main():
     data = get_json(url, access_token)
 
     pipelines = data.get("_embedded", {}).get("pipelines", [])
-    now_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now_utc = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
     rows = []
     for p in pipelines:

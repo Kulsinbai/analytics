@@ -33,7 +33,63 @@ def parse_dt(series: pd.Series) -> pd.Series:
     return dt
 
 
+def validate_csv(path: Path) -> pd.DataFrame | None:
+    """
+    Базовая валидация CSV перед удалением данных в ClickHouse.
+    Проверяем:
+    - файл существует;
+    - не пустой;
+    - содержит обязательные колонки, которые дальше используются.
+    """
+    if not path.exists():
+        print(f"ERROR: CSV не найден: {path}")
+        return None
+
+    if path.stat().st_size == 0:
+        print(f"ERROR: CSV пустой (size=0): {path}")
+        return None
+
+    try:
+        df = pd.read_csv(path, sep=";", encoding="utf-8-sig")
+    except Exception as e:
+        print(f"ERROR: не удалось прочитать CSV {path}: {e}")
+        return None
+
+    if df.empty:
+        print(f"ERROR: CSV прочитан, но не содержит строк: {path}")
+        return None
+
+    required_cols = [
+        "id",
+        "created_dt",
+        "updated_dt",
+        "closed_dt",
+        "status_id",
+        "pipeline_id",
+        "account_id",
+        "responsible_user_id",
+        "client_slug",
+        "name",
+    ]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        print(
+            "ERROR: в CSV отсутствуют обязательные колонки.\n"
+            f"Файл: {path}\n"
+            f"Нет колонок: {', '.join(missing)}"
+        )
+        return None
+
+    return df
+
+
 def main():
+    # 0) валидация CSV перед любыми изменениями в ClickHouse
+    df = validate_csv(LEADS_CSV)
+    if df is None:
+        # Лог уже выведен в validate_csv
+        return
+
     client = clickhouse_connect.get_client(
         host=CH_HOST,
         port=CH_PORT,
@@ -41,9 +97,6 @@ def main():
         password=CH_PASSWORD,
         database=CH_DB,
     )
-
-    # 0) читаем CSV
-    df = pd.read_csv(LEADS_CSV, sep=";", encoding="utf-8-sig")
 
     # 1) перезаливка данных клиента (тестовый режим)
     client.command(f"ALTER TABLE {CH_DB}.{CH_TABLE} DELETE WHERE client_id = 1")

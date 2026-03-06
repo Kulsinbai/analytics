@@ -1,6 +1,6 @@
 import csv
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 
 from scripts.amocrm_client import get_valid_access_token, get_json, AmoClientError
 from scripts.clients_map import get_client_id
@@ -20,7 +20,7 @@ def unix_to_dt_str(value):
     if value is None or value == "":
         return ""
     ts = int(float(str(value).replace(",", ".")))
-    return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main():

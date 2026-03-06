@@ -1,11 +1,17 @@
 import json
 import csv
 import re
-import html
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from scripts.clients_map import get_client_id
+from scripts.transform_utils import (
+    clean_text,
+    fix_mojibake,
+    normalize_phone,
+    parse_name_fields,
+    extract_utm as extract_custom_fields,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 INPUT_FILE = BASE_DIR / "data" / "add_leads_crm_with_client.json"
@@ -67,45 +73,6 @@ SITE_MARKER = "artroyal-detailing.ru"
 VA_SIP_RE = re.compile(r"\b(?:va|sip)\b", re.IGNORECASE)
 
 
-def fix_mojibake(s: str) -> str:
-    if not isinstance(s, str) or not s:
-        return s
-    for _ in range(3):
-        if "Ð" not in s and "Ñ" not in s:
-            break
-        try:
-            candidate = s.encode("latin1").decode("utf-8")
-        except Exception:
-            break
-        if candidate == s:
-            break
-        s = candidate
-    return s
-
-
-def clean_text(s: str) -> str:
-    if not isinstance(s, str):
-        return s
-    s = html.unescape(s)
-    s = TAG_RE.sub(" ", s)
-    s = s.replace("\r", " ").replace("\n", " ")
-    s = re.sub(r"\s+", " ", s).strip()
-    s = fix_mojibake(s)
-    return s
-
-
-def normalize_phone(raw: str) -> str:
-    raw = clean_text(raw)
-    digits = re.sub(r"\D", "", raw)
-    if not digits:
-        return ""
-    if len(digits) == 11 and digits.startswith("8"):
-        digits = "7" + digits[1:]
-    if len(digits) == 11 and digits.startswith("7"):
-        return "+" + digits
-    return digits
-
-
 def ts_to_iso(ts):
     """
     Unix timestamp (секунды) -> 'YYYY-MM-DD HH:MM:SS' в UTC.
@@ -118,65 +85,6 @@ def ts_to_iso(ts):
         return datetime.fromtimestamp(ts_int, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return ""
-
-
-def extract_custom_fields(custom_fields_values):
-    out = {
-        "phone": "",
-        "email": "",
-        "source": "",
-        "utm_source": "",
-        "utm_medium": "",
-        "utm_campaign": "",
-        "utm_content": "",
-        "utm_term": "",
-    }
-
-    if not custom_fields_values:
-        return out
-
-    def join_values(values):
-        arr = []
-        for v in values or []:
-            val = v.get("value")
-            if val is None:
-                continue
-            arr.append(clean_text(str(val)))
-        return "; ".join([x for x in arr if x])
-
-    for field in custom_fields_values:
-        code = (field.get("field_code") or "").upper()
-        name = clean_text(field.get("field_name") or "")
-        value_str = join_values(field.get("values"))
-
-        if not value_str:
-            continue
-
-        if code == "PHONE" and not out["phone"]:
-            out["phone"] = normalize_phone(value_str)
-            continue
-
-        if code == "EMAIL" and not out["email"]:
-            out["email"] = value_str
-            continue
-
-        lname = name.lower()
-
-        if "utm_source" in lname and not out["utm_source"]:
-            out["utm_source"] = value_str
-        elif "utm_medium" in lname and not out["utm_medium"]:
-            out["utm_medium"] = value_str
-        elif "utm_campaign" in lname and not out["utm_campaign"]:
-            out["utm_campaign"] = value_str
-        elif "utm_content" in lname and not out["utm_content"]:
-            out["utm_content"] = value_str
-        elif "utm_term" in lname and not out["utm_term"]:
-            out["utm_term"] = value_str
-
-        if (("источник" in lname) or (lname == "source")) and not out["source"]:
-            out["source"] = value_str
-
-    return out
 
 def extract_tags(lead: dict) -> str:
     """
@@ -192,41 +100,6 @@ def extract_tags(lead: dict) -> str:
             names.append(clean_text(str(n)).lower())
     # убираем дубли, сортируем чтобы было стабильно
     return "; ".join(sorted(set(names)))
-
-def parse_name_fields(name: str):
-    name = clean_text(name)
-    low = name.lower()
-
-    channel = ""
-    if "whatsapp" in low:
-        channel = "WhatsApp"
-    elif "telegram" in low:
-        channel = "Telegram"
-    elif "звон" in low:
-        channel = "Call"
-
-    m = PHONE_RE.search(name)
-    phone_from_name = normalize_phone(m.group(0)) if m else ""
-
-    name_clean = name
-    prefixes = [
-        "Новый лид ",
-        "Новый лид: ",
-        "Новый лид - ",
-        "Сделка по звонку ",
-        "Новый лид звонок с ",
-    ]
-    for p in prefixes:
-        if name_clean.startswith(p):
-            name_clean = name_clean[len(p):].strip()
-            break
-
-    if phone_from_name:
-        name_clean = PHONE_RE.sub("", name_clean).strip()
-        name_clean = re.sub(r"\s+", " ", name_clean)
-
-    return channel, phone_from_name, name_clean
-
 
 def apply_rules(row: dict) -> dict:
     """
