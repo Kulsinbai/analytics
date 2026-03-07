@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 import json
 import csv
 import re
@@ -17,9 +24,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 INPUT_FILE = BASE_DIR / "data" / "add_leads_crm_with_client.json"
 OUTPUT_FILE = BASE_DIR / "data" / "add_leads_crm_flat_datalens.csv"
 
-# client_slug берём из параметра запуска:
-# python scripts/leads_json_to_datalens_csv.py artroyal_detailing
-CLIENT_SLUG = sys.argv[1] if len(sys.argv) > 1 else "artroyal_detailing"
+# client_slug берём из параметра запуска при запуске как скрипт; при импорте — дефолт
+CLIENT_SLUG = "artroyal_detailing"
 CLIENT_ID = get_client_id(CLIENT_SLUG)
 
 BASE_FIELDS = [
@@ -157,57 +163,61 @@ def apply_rules(row: dict) -> dict:
 
 
 # --- main ---
-with open(INPUT_FILE, "r", encoding="utf-8") as f:
-    leads = json.load(f)
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        CLIENT_SLUG = sys.argv[1]
+        CLIENT_ID = get_client_id(CLIENT_SLUG)
+    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+        leads = json.load(f)
 
-with open(OUTPUT_FILE, "w", newline="", encoding="utf-8-sig") as f:
-    writer = csv.DictWriter(
-        f,
-        fieldnames=FIELDS,
-        delimiter=";",
-        quoting=csv.QUOTE_MINIMAL  # без лишних кавычек
-    )
-    writer.writeheader()
+    with open(OUTPUT_FILE, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=FIELDS,
+            delimiter=";",
+            quoting=csv.QUOTE_MINIMAL  # без лишних кавычек
+        )
+        writer.writeheader()
 
-    for lead in leads:
-        row = {k: lead.get(k, "") for k in BASE_FIELDS}
+        for lead in leads:
+            row = {k: lead.get(k, "") for k in BASE_FIELDS}
 
-        # принудительно проставляем корректного клиента
-        row["client_id"] = CLIENT_ID
-        row["client_slug"] = CLIENT_SLUG
+            # принудительно проставляем корректного клиента
+            row["client_id"] = CLIENT_ID
+            row["client_slug"] = CLIENT_SLUG
 
-        # ===== даты: timestamp -> ISO (UTC) =====
-        created_iso = ts_to_iso(row.get("created_at"))
-        updated_iso = ts_to_iso(row.get("updated_at"))
-        closed_iso = ts_to_iso(row.get("closed_at"))
+            # ===== даты: timestamp -> ISO (UTC) =====
+            created_iso = ts_to_iso(row.get("created_at"))
+            updated_iso = ts_to_iso(row.get("updated_at"))
+            closed_iso = ts_to_iso(row.get("closed_at"))
 
-        # Основные поля (для ClickHouse и отчётов) — делаем нормальными DateTime-строками
-        row["created_at"] = created_iso
-        row["updated_at"] = updated_iso
-        row["closed_at"] = closed_iso
+            # Основные поля (для ClickHouse и отчётов) — делаем нормальными DateTime-строками
+            row["created_at"] = created_iso
+            row["updated_at"] = updated_iso
+            row["closed_at"] = closed_iso
 
-        # Дубли для DataLens (можно оставить)
-        row["created_dt"] = created_iso
-        row["updated_dt"] = updated_iso
-        row["closed_dt"] = closed_iso
+            # Дубли для DataLens (можно оставить)
+            row["created_dt"] = created_iso
+            row["updated_dt"] = updated_iso
+            row["closed_dt"] = closed_iso
 
-        # чистим name и распаковываем из него поля
-        row["name"] = clean_text(str(row.get("name", "")))
-        channel, phone_from_name, name_clean = parse_name_fields(row["name"])
-        row["channel"] = channel
-        row["phone_from_name"] = phone_from_name
-        row["name_clean"] = name_clean
+            # чистим name и распаковываем из него поля
+            row["name"] = clean_text(str(row.get("name", "")))
+            channel, phone_from_name, name_clean = parse_name_fields(row["name"])
+            row["channel"] = channel
+            row["phone_from_name"] = phone_from_name
+            row["name_clean"] = name_clean
 
-        # кастомные поля
-        row.update(extract_custom_fields(lead.get("custom_fields_values")))
+            # кастомные поля
+            row.update(extract_custom_fields(lead.get("custom_fields_values")))
 
-        # теги
-        row["tags"] = extract_tags(lead)
+            # теги
+            row["tags"] = extract_tags(lead)
 
-        # правила по source/channel
-        row = apply_rules(row)
+            # правила по source/channel
+            row = apply_rules(row)
 
-        writer.writerow(row)
+            writer.writerow(row)
 
-print("Готово. CSV сохранён:", OUTPUT_FILE)
-print("Лидов выгружено:", len(leads))
+    print("Готово. CSV сохранён:", OUTPUT_FILE)
+    print("Лидов выгружено:", len(leads))

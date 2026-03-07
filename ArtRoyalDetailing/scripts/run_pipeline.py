@@ -208,9 +208,9 @@ def run_dims_pipeline(client_slug: str, log) -> None:
     if loss_rows < 0:
         raise RuntimeError("Валидация CSV loss_reasons не пройдена, загрузка в ClickHouse отменена.")
 
-    # 2) Загрузка причин потерь в ClickHouse (вариант для artroyal_detailing)
+    # 2) Загрузка причин потерь в ClickHouse
     run_step(
-        ["scripts/load_loss_reasons_to_clickhouse_artroyal_detailing.py"],
+        ["scripts/load_loss_reasons_dim_to_clickhouse.py"],
         "Справочники: шаг 2/4 — загрузка loss_reasons в ClickHouse",
         log,
     )
@@ -240,7 +240,7 @@ def run_dims_pipeline(client_slug: str, log) -> None:
 
     # 4) Загрузка статусов в ClickHouse
     run_step(
-        ["scripts/load_statuses_to_clickhouse_artroyal_detailing.py"],
+        ["scripts/load_statuses_dim_to_clickhouse.py"],
         "Справочники: шаг 4/4 — загрузка статусов в ClickHouse",
         log,
     )

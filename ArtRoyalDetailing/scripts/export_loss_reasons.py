@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 import csv
 from pathlib import Path
 from datetime import datetime, UTC
@@ -20,7 +27,7 @@ def unix_to_dt_str(value):
     if value is None or value == "":
         return ""
     ts = int(float(str(value).replace(",", ".")))
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main():
@@ -32,7 +39,7 @@ def main():
 
         items = data.get("_embedded", {}).get("loss_reasons", [])
         if not items:
-            print("⚠️ Справочник loss_reasons пуст или не найден в ответе API.")
+            print("Справочник loss_reasons пуст или не найден в ответе API.")
             print("Ответ:", data)
             return
 
@@ -65,11 +72,11 @@ def main():
                     "sort": it.get("sort")
                 })
 
-        print("✅ CSV выгружен:", OUT_PATH)
-        print(f"✅ Записей: {len(items)}")
+        print("CSV выгружен:", OUT_PATH)
+        print(f"Записей: {len(items)}")
 
     except AmoClientError as e:
-        print("❌ Ошибка клиента amoCRM:", e)
+        print("Ошибка клиента amoCRM:", e)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,60 @@
 - **Формирование плоских CSV для ClickHouse/DataLens**
 - **Загрузка фактов и справочников в ClickHouse**
 
-Ниже описан боевой порядок запуска и входы/выходы каждого шага.
+---
+
+## Структура проекта
+
+```
+ArtRoyalDetailing
+│
+├── scripts
+│   ├── run_pipeline.py                # основной оркестратор ETL
+│   ├── amocrm_export_leads.py         # выгрузка лидов из amoCRM
+│   ├── leads_json_to_datalens_csv.py  # преобразование JSON → CSV
+│   ├── load_leads_csv_to_clickhouse.py
+│   ├── export_loss_reasons.py
+│   ├── amocrm_get_statuses_dim.py
+│   ├── manual_daily_report.py         # генерация текста отчёта клиенту
+│
+├── data                               # промежуточные JSON и CSV
+├── logs                               # логи пайплайна
+├── secrets                            # OAuth токены amoCRM
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Установка зависимостей
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+---
+
+## Ежедневная работа
+
+**Обновить лиды:**
+
+```bash
+python scripts/run_pipeline.py --client-slug artroyal_detailing --leads
+```
+
+**Полный refresh (справочники + лиды):**
+
+```bash
+python scripts/run_pipeline.py --client-slug artroyal_detailing --all
+```
+
+**Сформировать отчёт клиенту:**
+
+```bash
+python scripts/manual_daily_report.py
+```
 
 ---
 
@@ -119,8 +172,6 @@
   - **Выход**:
     - `data/add_leads_crm_flat_datalens.csv` — плоский CSV с расширенным набором полей для отчётов
 
-> В каталоге есть несколько экспериментальных версий преобразования (`json_to_csv*.py`), но для боевого запуска рекомендуется опираться на `leads_json_to_datalens_csv.py` как на каноничный шаг.
-
 ### 4. Загрузка факта лидов в ClickHouse
 
 - **Шаг 4.1. Загрузить лиды в факт‑таблицу**
@@ -155,34 +206,11 @@
 
 #### 5.2. Загрузка в ClickHouse
 
-В проекте есть несколько вариантов загрузки одного и того же CSV в разные таблицы. Для боевого использования выберите одну схему и соответствующий скрипт.
+- **Боевой загрузчик**: `scripts/load_loss_reasons_dim_to_clickhouse.py`
+  - **Вход**: `data/loss_reasons.csv`
+  - **Поведение**: удаляет данные клиента в таблице `default_db.loss_reasons_dim_v2`, затем вставляет строки с полями `client_id`, `client_slug`, `loss_reason_id`, `loss_reason_name`, `created_at`, `updated_at`, `sort`.
 
-- **Вариант А. Таблица `loss_reasons_dim` (минимальная схема)**
-  - **Скрипт**: `scripts/load_loss_reasons_dim_to_clickhouse.py`
-  - **Вход**:
-    - `data/loss_reasons.csv`
-  - **Поведение**:
-    - `ALTER TABLE default_db.loss_reasons_dim DELETE WHERE client_id = 1`
-    - загружает только `id`, `name`, `client_id`, `etl_loaded_at`
-
-- **Вариант Б. Таблица `loss_reasons_dim_v2`**
-  - **Скрипт**: `scripts/load_loss_reasons_to_clickhouse.py`
-  - **Вход**:
-    - `data/loss_reasons.csv`
-  - **Поведение**:
-    - `ALTER TABLE loss_reasons_dim_v2 DELETE WHERE client_id = {CLIENT_ID}`
-    - загружает полную структуру (id, name, created_at, updated_at, sort и т.п.) через `clickhouse_connect.insert`
-
-- **Вариант В. Таблица `loss_reasons_dim_artroyal_detailing` (под клиента)**
-  - **Скрипт**: `scripts/load_loss_reasons_to_clickhouse_artroyal_detailing.py`
-  - **Вход**:
-    - `data/loss_reasons.csv`
-    - `scripts/clients_map.py` (определяет `CLIENT_ID`/`CLIENT_SLUG`)
-  - **Поведение**:
-    - `ALTER TABLE default_db.loss_reasons_dim_artroyal_detailing DELETE WHERE client_id = {CLIENT_ID}`
-    - загружает поля `client_id`, `client_slug`, `id`, `name`, `created_at`, `updated_at`, `sort`
-
-> Рекомендуется зафиксировать один целевой вариант (обычно «В») и использовать только его в боевом контуре, остальные скрипты пометить как legacy/черновики.
+Остальные варианты загрузки loss_reasons перенесены в `scripts/_archive`.
 
 ---
 
@@ -203,30 +231,20 @@
 
 #### 6.2. Загрузка статусов в ClickHouse
 
-Аналогично loss_reasons, есть два варианта:
-
-- **Вариант А. Таблица `statuses_dim_artroyal_detailing`**
-  - **Скрипт**: `scripts/load_statuses_dim_to_clickhouse.py`
-  - **Вход**:
-    - `data/pipelines_statuses_dim.csv`
-  - **Поведение**:
-    - `ALTER TABLE default_db.statuses_dim_artroyal_detailing DELETE WHERE client_id = {CLIENT_ID}`
-    - загружает статусы через `pandas` и `insert_df`, аккуратно приводит типы (`is_final`, `is_won`, `is_lost` как числовые/Nullable)
-
-- **Вариант Б. Таблица `statuses_dim_v2`**
-  - **Скрипт**: `scripts/load_statuses_to_clickhouse_artroyal_detailing.py`
-  - **Вход**:
-    - `data/pipelines_statuses_dim.csv`
-  - **Поведение**:
-    - `ALTER TABLE statuses_dim_v2 DELETE WHERE client_id = {CLIENT_ID}`
-    - читает CSV через `csv.DictReader`, парсит даты и флаги и вставляет через `clickhouse_connect.insert`
-
-> Для боевого запуска также имеет смысл выбрать один целевой вариант (А или Б) и унифицировать на нём все отчёты.
+- **Боевой загрузчик**: `scripts/load_statuses_dim_to_clickhouse.py`
+  - **Вход**: `data/pipelines_statuses_dim.csv`
+  - **Поведение**: удаляет данные клиента в таблице `default_db.statuses_dim_v2`, затем вставляет статусы с приведением типов (`is_final`, `is_won`, `is_lost` и т.д.).
 
 ---
 
-## Замечания по безопасности и конфигам
+## Генерация ежедневного отчёта
 
-- Доступы к ClickHouse (`CH_HOST`, `CH_USER`, `CH_PASSWORD` и т.п.) сейчас захардкожены в скриптах загрузки. Для боевого окружения рекомендуется вынести их в отдельный конфиг или переменные окружения.
-- Маппинг клиентов (`scripts/clients_map.py`) сейчас содержит только `artroyal_detailing → 1`; при добавлении новых клиентов нужно расширять эту карту и параметризовать скрипты по `CLIENT_SLUG`.
+Скрипт **`scripts/manual_daily_report.py`** формирует готовый текст ежедневного отчёта для клиента на основе данных в ClickHouse (лиды, коммуникации, продажи, потерянные сделки, причины потерь).
 
+**Пример запуска:**
+
+```bash
+python scripts/manual_daily_report.py
+```
+
+Скрипт не входит в пайплайн `run_pipeline.py` и запускается отдельно после обновления данных.

@@ -111,7 +111,7 @@ def main():
             f"Если порт занят, поменяй redirect_uri на 8090 и в коде тоже (localhost, 8090).")
 
     server.handle_request()  # ждём ровно один запрос (redirect)
-    print("\nГотово. Следующий шаг: обменять code на access_token/refresh_token.")
+    print("\nГотово. Следующий шаг: обменять code на oauth_exchange_tokens.py")
 
 
 if __name__ == "__main__":
