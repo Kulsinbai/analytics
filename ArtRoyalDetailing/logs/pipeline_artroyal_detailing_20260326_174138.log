@@ -1,0 +1,26 @@
+[2026-03-26 17:41:38] Старт пайплайна для клиента 'artroyal_detailing'. Лог-файл: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/logs/pipeline_artroyal_detailing_20260326_174138.log
+[2026-03-26 17:41:38] ##### Запуск пайплайна лидов для клиента: artroyal_detailing (id=1) #####
+[2026-03-26 17:41:38] === START: Лиды: шаг 1/4 — выгрузка лидов из amoCRM ===
+[2026-03-26 17:41:38] Команда: scripts/amocrm_export_leads.py
+[2026-03-26 17:42:33] [stdout] Готово. Лидов выгружено: 7930
+[2026-03-26 17:42:33] ✔ Шаг 'Лиды: шаг 1/4 — выгрузка лидов из amoCRM' успешно выполнен за 55.1 c
+[2026-03-26 17:42:33] JSON 'add_leads_crm.json': найдено лидов = 7930
+[2026-03-26 17:42:33] === START: Лиды: шаг 2/4 — добавление client_id/client_slug в JSON ===
+[2026-03-26 17:42:33] Команда: scripts/add_client_id.py
+[2026-03-26 17:42:34] [stdout] Готово. Файл сохранён: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/data/add_leads_crm_with_client.json
+[2026-03-26 17:42:34] [stdout] client_id = 1 | client_slug = artroyal_detailing
+[2026-03-26 17:42:34] ✔ Шаг 'Лиды: шаг 2/4 — добавление client_id/client_slug в JSON' успешно выполнен за 0.4 c
+[2026-03-26 17:42:34] JSON 'add_leads_crm_with_client.json': найдено лидов = 7930
+[2026-03-26 17:42:34] === START: Лиды: шаг 3/4 — преобразование JSON в плоский CSV для отчётности ===
+[2026-03-26 17:42:34] Команда: scripts/leads_json_to_datalens_csv.py artroyal_detailing
+[2026-03-26 17:42:34] [stdout] Готово. CSV сохранён: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/data/add_leads_crm_flat_datalens.csv
+[2026-03-26 17:42:34] [stdout] Лидов выгружено: 7930
+[2026-03-26 17:42:34] ✔ Шаг 'Лиды: шаг 3/4 — преобразование JSON в плоский CSV для отчётности' успешно выполнен за 0.4 c
+[2026-03-26 17:42:34] CSV 'add_leads_crm_flat_datalens.csv': строк данных (без заголовка) = 7930
+[2026-03-26 17:42:34] === START: Лиды: шаг 4/4 — загрузка CSV в ClickHouse ===
+[2026-03-26 17:42:34] Команда: scripts/load_leads_csv_to_clickhouse.py
+[2026-03-26 17:42:37] [stdout] OK. Inserted rows: 7930
+[2026-03-26 17:42:37] [stdout] Client: 1
+[2026-03-26 17:42:37] ✔ Шаг 'Лиды: шаг 4/4 — загрузка CSV в ClickHouse' успешно выполнен за 2.9 c
+[2026-03-26 17:42:37] ##### Пайплайн лидов для artroyal_detailing (id=1) завершён успешно #####
+[2026-03-26 17:42:37] ✔ Пайплайн успешно завершён. Общее время выполнения: 59.0 c
