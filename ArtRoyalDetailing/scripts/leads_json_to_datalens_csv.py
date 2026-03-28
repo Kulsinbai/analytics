@@ -8,6 +8,7 @@ if str(BASE_DIR) not in sys.path:
 import json
 import csv
 import re
+import argparse
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -21,8 +22,8 @@ from scripts.transform_utils import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-INPUT_FILE = BASE_DIR / "data" / "add_leads_crm_with_client.json"
-OUTPUT_FILE = BASE_DIR / "data" / "add_leads_crm_flat_datalens.csv"
+DEFAULT_INPUT_FILE = BASE_DIR / "data" / "add_leads_crm_with_client.json"
+DEFAULT_OUTPUT_FILE = BASE_DIR / "data" / "add_leads_crm_flat_datalens.csv"
 
 # client_slug берём из параметра запуска при запуске как скрипт; при импорте — дефолт
 CLIENT_SLUG = "artroyal_detailing"
@@ -164,13 +165,29 @@ def apply_rules(row: dict) -> dict:
 
 # --- main ---
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        CLIENT_SLUG = sys.argv[1]
-        CLIENT_ID = get_client_id(CLIENT_SLUG)
-    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+    # Backward compatible:
+    # - old style: python leads_json_to_datalens_csv.py <client_slug>
+    # - new style: python leads_json_to_datalens_csv.py --client-slug <slug> --in ... --out ...
+    p = argparse.ArgumentParser(description="Преобразование лидов JSON → плоский CSV (safe multi-client).")
+    p.add_argument("client_slug_pos", nargs="?", help="(legacy) client_slug позиционным аргументом")
+    p.add_argument("--client-slug", dest="client_slug", default=None, help="client_slug из scripts/clients_map.py")
+    p.add_argument("--in", dest="in_path", default=str(DEFAULT_INPUT_FILE), help="Путь к входному JSON")
+    p.add_argument("--out", dest="out_path", default=str(DEFAULT_OUTPUT_FILE), help="Путь к выходному CSV")
+    args = p.parse_args()
+
+    CLIENT_SLUG = (args.client_slug or args.client_slug_pos)
+    if not CLIENT_SLUG:
+        raise SystemExit("ERROR: required --client-slug (or legacy positional client_slug).")
+    CLIENT_ID = get_client_id(CLIENT_SLUG)
+
+    in_path = Path(args.in_path)
+    out_path = Path(args.out_path)
+
+    with open(in_path, "r", encoding="utf-8") as f:
         leads = json.load(f)
 
-    with open(OUTPUT_FILE, "w", newline="", encoding="utf-8-sig") as f:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(
             f,
             fieldnames=FIELDS,
@@ -219,5 +236,5 @@ if __name__ == "__main__":
 
             writer.writerow(row)
 
-    print("Готово. CSV сохранён:", OUTPUT_FILE)
+    print("Готово. CSV сохранён:", out_path)
     print("Лидов выгружено:", len(leads))

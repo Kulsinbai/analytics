@@ -1,0 +1,31 @@
+[2026-03-26 19:12:50] Старт пайплайна для клиента 'artroyal_detailing' (id=1). Лог-файл: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/logs/pipeline_artroyal_detailing_20260326_191250.log
+[2026-03-26 19:12:50] Артефакты будут писаться в: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/var/data/artroyal_detailing
+[2026-03-26 19:12:50] ##### Запуск пайплайна справочников для клиента: artroyal_detailing (id=1) #####
+[2026-03-26 19:12:50] Контекст клиента (dims):
+[2026-03-26 19:12:50] - client_slug=artroyal_detailing
+[2026-03-26 19:12:50] - client_id=1
+[2026-03-26 19:12:50] - loss_csv=/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/var/data/artroyal_detailing/loss_reasons.csv
+[2026-03-26 19:12:50] - statuses_csv=/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/var/data/artroyal_detailing/pipelines_statuses_dim.csv
+[2026-03-26 19:12:50] === START: Справочники: шаг 1/4 — выгрузка причин потерь из amoCRM ===
+[2026-03-26 19:12:50] Команда: scripts/export_loss_reasons.py --client-slug artroyal_detailing --out /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/var/data/artroyal_detailing/loss_reasons.csv
+[2026-03-26 19:12:51] [stdout] CSV выгружен: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/var/data/artroyal_detailing/loss_reasons.csv
+[2026-03-26 19:12:51] [stdout] Записей: 8
+[2026-03-26 19:12:51] ✔ Шаг 'Справочники: шаг 1/4 — выгрузка причин потерь из amoCRM' успешно выполнен за 1.0 c
+[2026-03-26 19:12:51] CSV 'loss_reasons.csv': строк данных (без заголовка) = 8
+[2026-03-26 19:12:51] === START: Справочники: шаг 2/4 — загрузка loss_reasons в ClickHouse ===
+[2026-03-26 19:12:51] Команда: scripts/load_loss_reasons_dim_to_clickhouse.py --client-slug artroyal_detailing --csv-path /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/var/data/artroyal_detailing/loss_reasons.csv
+[2026-03-26 19:12:51] [stderr] Traceback (most recent call last):
+[2026-03-26 19:12:51] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/scripts/load_loss_reasons_dim_to_clickhouse.py", line 162, in <module>
+[2026-03-26 19:12:51] [stderr]     main()
+[2026-03-26 19:12:51] [stderr]     ~~~~^^
+[2026-03-26 19:12:51] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/scripts/load_loss_reasons_dim_to_clickhouse.py", line 79, in main
+[2026-03-26 19:12:51] [stderr]     ch, db = _clickhouse_client()
+[2026-03-26 19:12:51] [stderr]              ~~~~~~~~~~~~~~~~~~^^
+[2026-03-26 19:12:51] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/scripts/load_loss_reasons_dim_to_clickhouse.py", line 46, in _clickhouse_client
+[2026-03-26 19:12:51] [stderr]     host = _env_required("CLICKHOUSE_HOST")
+[2026-03-26 19:12:51] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/scripts/load_loss_reasons_dim_to_clickhouse.py", line 41, in _env_required
+[2026-03-26 19:12:51] [stderr]     raise ValueError(f"Не задан env {name} (обязателен).")
+[2026-03-26 19:12:51] [stderr] ValueError: Не задан env CLICKHOUSE_HOST (обязателен).
+[2026-03-26 19:12:51] ✖ Шаг 'Справочники: шаг 2/4 — загрузка loss_reasons в ClickHouse' завершился с ошибкой, код=1, время=0.4 c
+[2026-03-26 19:12:51] ✖ Пайплайн завершился с ошибкой: Step failed: Справочники: шаг 2/4 — загрузка loss_reasons в ClickHouse
+[2026-03-26 19:12:51] Итоговое время выполнения (c ошибкой): 1.4 c

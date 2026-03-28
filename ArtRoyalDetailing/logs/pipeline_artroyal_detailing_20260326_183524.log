@@ -1,0 +1,15 @@
+[2026-03-26 18:35:24] Старт пайплайна для клиента 'artroyal_detailing'. Лог-файл: /Users/kulsinbai/PycharmProjects/analytics/ArtRoyalDetailing/logs/pipeline_artroyal_detailing_20260326_183524.log
+[2026-03-26 18:35:24] ##### Запуск пайплайна лидов для клиента: artroyal_detailing (id=1) #####
+[2026-03-26 18:35:24] === START: Лиды: шаг 1/4 — выгрузка лидов из amoCRM ===
+[2026-03-26 18:35:24] Команда: scripts/amocrm_export_leads.py
+[2026-03-26 18:36:15] [stdout] Готово. Лидов выгружено: 7931
+[2026-03-26 18:36:15] ✔ Шаг 'Лиды: шаг 1/4 — выгрузка лидов из amoCRM' успешно выполнен за 51.2 c
+[2026-03-26 18:36:15] JSON 'add_leads_crm.json': найдено лидов = 7931
+[2026-03-26 18:36:15] === START: Лиды: шаг 2/4 — добавление client_id/client_slug в JSON ===
+[2026-03-26 18:36:15] Команда: scripts/add_client_id.py
+[2026-03-26 18:36:15] [stderr] usage: add_client_id.py [-h] --client-slug CLIENT_SLUG [--in IN_PATH]
+[2026-03-26 18:36:15] [stderr]                         [--out OUT_PATH]
+[2026-03-26 18:36:15] [stderr] add_client_id.py: error: the following arguments are required: --client-slug
+[2026-03-26 18:36:15] ✖ Шаг 'Лиды: шаг 2/4 — добавление client_id/client_slug в JSON' завершился с ошибкой, код=2, время=0.0 c
+[2026-03-26 18:36:15] ✖ Пайплайн завершился с ошибкой: Step failed: Лиды: шаг 2/4 — добавление client_id/client_slug в JSON
+[2026-03-26 18:36:15] Итоговое время выполнения (c ошибкой): 51.3 c

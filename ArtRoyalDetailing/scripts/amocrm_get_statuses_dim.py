@@ -7,25 +7,31 @@ if str(BASE_DIR) not in sys.path:
 
 import json
 import csv
+import argparse
 from pathlib import Path
 from datetime import datetime, UTC
 
-CLIENT_SLUG = "artroyal_detailing"
-
 from scripts.clients_map import get_client_id
-
-CLIENT_ID = get_client_id(CLIENT_SLUG)
 
 # Берём токен и делаем запросы через твой клиент (он сам refresh делает)
 from scripts.amocrm_client import get_valid_access_token, get_json
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-OUT_CSV = BASE_DIR / "data" / "pipelines_statuses_dim.csv"
 
 
 def main():
-    account_domain, access_token = get_valid_access_token()
+    p = argparse.ArgumentParser(description="Выгрузка pipelines/statuses из amoCRM в CSV (safe multi-client).")
+    p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+    p.add_argument("--out", dest="out_path", default=None, help="Путь к выходному CSV")
+    args = p.parse_args()
+
+    client_slug = args.client_slug
+    client_id = get_client_id(client_slug)
+    default_out = BASE_DIR / "var" / "data" / client_slug / "pipelines_statuses_dim.csv"
+    out_csv = Path(args.out_path) if args.out_path else default_out
+
+    account_domain, access_token = get_valid_access_token(client_slug)
 
     url = f"{account_domain}/api/v4/leads/pipelines"
     data = get_json(url, access_token)
@@ -41,8 +47,8 @@ def main():
         statuses = p.get("_embedded", {}).get("statuses", [])
         for s in statuses:
             rows.append({
-                "client_id": CLIENT_ID,
-                "client_slug": CLIENT_SLUG,
+                "client_id": client_id,
+                "client_slug": client_slug,
                 "pipeline_id": pipeline_id,
                 "pipeline_name": pipeline_name,
                 "status_id": s.get("id"),
@@ -54,7 +60,8 @@ def main():
                 "updated_at": now_utc,
             })
 
-    with open(OUT_CSV, "w", newline="", encoding="utf-8-sig") as f:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(
             f,
             fieldnames=[
@@ -69,7 +76,7 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
-    print("Готово:", OUT_CSV, "строк:", len(rows))
+    print("Готово:", out_csv, "строк:", len(rows))
 
 
 if __name__ == "__main__":

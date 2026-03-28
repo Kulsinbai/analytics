@@ -6,18 +6,14 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 import csv
+import argparse
 from pathlib import Path
 from datetime import datetime, UTC
 
 from scripts.amocrm_client import get_valid_access_token, get_json, AmoClientError
 from scripts.clients_map import get_client_id
 
-CLIENT_SLUG = "artroyal_detailing"
-CLIENT_ID = get_client_id(CLIENT_SLUG)
-
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-OUT_PATH = DATA_DIR / "loss_reasons.csv"
 
 def unix_to_dt_str(value):
     """
@@ -32,7 +28,17 @@ def unix_to_dt_str(value):
 
 def main():
     try:
-        account_domain, access_token = get_valid_access_token()
+        p = argparse.ArgumentParser(description="Выгрузка loss_reasons из amoCRM в CSV (safe multi-client).")
+        p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+        p.add_argument("--out", dest="out_path", default=None, help="Путь к выходному CSV")
+        args = p.parse_args()
+
+        client_slug = args.client_slug
+        client_id = get_client_id(client_slug)
+        default_out = BASE_DIR / "var" / "data" / client_slug / "loss_reasons.csv"
+        out_path = Path(args.out_path) if args.out_path else default_out
+
+        account_domain, access_token = get_valid_access_token(client_slug)
 
         url = f"{account_domain}/api/v4/leads/loss_reasons"
         data = get_json(url, access_token)
@@ -43,7 +49,7 @@ def main():
             print("Ответ:", data)
             return
 
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
         fieldnames = [
             "client_id", "client_slug",
@@ -52,7 +58,7 @@ def main():
             "sort"
         ]
 
-        with open(OUT_PATH, "w", newline="", encoding="utf-8-sig") as f:
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=fieldnames,
@@ -62,8 +68,8 @@ def main():
 
             for it in items:
                 writer.writerow({
-                    "client_id": CLIENT_ID,
-                    "client_slug": CLIENT_SLUG,
+                    "client_id": client_id,
+                    "client_slug": client_slug,
 
                     "loss_reason_id": it.get("id"),
                     "loss_reason_name": it.get("name"),
@@ -72,7 +78,7 @@ def main():
                     "sort": it.get("sort")
                 })
 
-        print("CSV выгружен:", OUT_PATH)
+        print("CSV выгружен:", out_path)
         print(f"Записей: {len(items)}")
 
     except AmoClientError as e:

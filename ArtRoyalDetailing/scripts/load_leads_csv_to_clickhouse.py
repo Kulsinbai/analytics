@@ -1,5 +1,7 @@
 import sys
 from pathlib import Path
+import os
+import argparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
@@ -9,21 +11,12 @@ import pandas as pd
 import clickhouse_connect
 from pathlib import Path
 from datetime import datetime, timezone
+from scripts.clients_map import get_client_id
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-LEADS_CSV = BASE_DIR / "data" / "add_leads_crm_flat_datalens.csv"
-
-CLIENT_ID = 1
-CH_DB = "default_db"
-CH_TABLE = "leads_fact"
-
-# ====== заполни своими данными ======
-CH_HOST = "217.18.63.106"      # например: xxx.timeweb.cloud или IP
-CH_PORT = 8123             # чаще всего 8123 (HTTP)
-CH_USER = "gen_user"
-CH_PASSWORD = "tucxERGS+7SLVu"
-# ================================
+DEFAULT_LEADS_CSV = BASE_DIR / "data" / "add_leads_crm_flat_datalens.csv"
+DEFAULT_TABLE = "leads_fact"
 
 
 def parse_dt(series: pd.Series) -> pd.Series:
@@ -90,29 +83,95 @@ def validate_csv(path: Path) -> pd.DataFrame | None:
     return df
 
 
+def _env_required(name: str) -> str:
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        raise ValueError(f"Не задан env {name} (обязателен).")
+    return v
+
+
+def _clickhouse_client():
+    host = _env_required("CLICKHOUSE_HOST")
+    port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
+    user = _env_required("CLICKHOUSE_USER")
+    password = _env_required("CLICKHOUSE_PASSWORD")
+    db = _env_required("CLICKHOUSE_DB")
+
+    client = clickhouse_connect.get_client(
+        host=host,
+        port=port,
+        username=user,
+        password=password,
+        database=db,
+    )
+    return client, db
+
+
+def _assert_csv_matches_client(df: pd.DataFrame, client_id: int, client_slug: str) -> None:
+    if "client_id" in df.columns:
+        try:
+            ids = pd.to_numeric(df["client_id"], errors="coerce").dropna().astype("int64").unique().tolist()
+        except Exception:
+            ids = []
+        ids = [int(x) for x in ids if int(x) > 0]
+        if ids and set(ids) != {client_id}:
+            raise ValueError(
+                f"CSV содержит client_id {sorted(set(ids))}, но ожидается только {client_id}. "
+                "Остановлено, чтобы не повредить данные."
+            )
+
+    if "client_slug" in df.columns:
+        slugs = df["client_slug"].dropna().astype(str).str.strip()
+        uniq = sorted(set([s for s in slugs.tolist() if s]))
+        if uniq and set(uniq) != {client_slug}:
+            raise ValueError(
+                f"CSV содержит client_slug {uniq}, но ожидается только '{client_slug}'. "
+                "Остановлено, чтобы не повредить данные."
+            )
+
+
 def main():
+    p = argparse.ArgumentParser(description="Загрузка leads_fact в ClickHouse (safe multi-client).")
+    p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+    p.add_argument("--csv-path", default=str(DEFAULT_LEADS_CSV), help="Путь к CSV add_leads_crm_flat_datalens.csv")
+    p.add_argument("--ch-table", default=DEFAULT_TABLE, help="Имя таблицы ClickHouse (без БД)")
+    p.add_argument("--dry-run", action="store_true", help="Не выполнять DELETE/INSERT, только проверки и план действий")
+    args = p.parse_args()
+
+    client_slug = args.client_slug
+    client_id = get_client_id(client_slug)
+    if not isinstance(client_id, int) or client_id <= 0:
+        raise ValueError("client_id должен быть положительным целым числом.")
+
+    leads_csv = Path(args.csv_path)
     # 0) валидация CSV перед любыми изменениями в ClickHouse
-    df = validate_csv(LEADS_CSV)
+    df = validate_csv(leads_csv)
     if df is None:
         # Лог уже выведен в validate_csv
         return
 
-    client = clickhouse_connect.get_client(
-        host=CH_HOST,
-        port=CH_PORT,
-        username=CH_USER,
-        password=CH_PASSWORD,
-        database=CH_DB,
-    )
+    _assert_csv_matches_client(df, client_id=client_id, client_slug=client_slug)
+
+    client, db = _clickhouse_client()
+    table = args.ch_table
+    full_table = f"{db}.{table}"
 
     # 1) перезаливка данных клиента (тестовый режим)
-    client.command(f"ALTER TABLE {CH_DB}.{CH_TABLE} DELETE WHERE client_id = 1")
+    if args.dry_run:
+        print("DRY RUN")
+        print("Target table:", full_table)
+        print("Client:", client_slug, "id=", client_id)
+        print("CSV:", leads_csv, "rows=", len(df))
+        print("Planned:", f"DELETE WHERE client_id = {client_id}", "+ INSERT rows")
+        return
+
+    client.command(f"ALTER TABLE {full_table} DELETE WHERE client_id = {client_id}")
 
     etl_loaded_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # 2) строим датафрейм ровно под схему ClickHouse
     out = pd.DataFrame()
-    out["client_id"] = 1  # жёстко для теста
+    out["client_id"] = client_id
 
     # CSV.id -> CH.lead_id
     out["lead_id"] = pd.to_numeric(df.get("id"), errors="coerce").fillna(0).astype("int64")
@@ -167,13 +226,13 @@ def main():
     out = out.where(pd.notnull(out), None)
 
     # client_id — NOT NULL, фиксируем ЖЁСТКО
-    out["client_id"] = 1
+    out["client_id"] = client_id
 
     # 4) вставка
-    client.insert_df(f"{CH_DB}.{CH_TABLE}", out)
+    client.insert_df(full_table, out)
 
     print("OK. Inserted rows:", len(out))
-    print("Client:", CLIENT_ID)
+    print("Client:", client_id, "| slug:", client_slug)
 
 
 if __name__ == "__main__":

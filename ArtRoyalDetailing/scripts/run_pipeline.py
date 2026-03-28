@@ -17,6 +17,7 @@ from scripts.clients_map import get_client_id
 
 DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
+VAR_DIR = BASE_DIR / "var"
 
 
 def make_logger(client_slug: str):
@@ -129,13 +130,23 @@ def run_leads_pipeline(client_slug: str, log) -> None:
     client_id = get_client_id(client_slug)
     log(f"##### Запуск пайплайна лидов для клиента: {client_slug} (id={client_id}) #####")
 
-    leads_json = DATA_DIR / "add_leads_crm.json"
-    leads_with_client_json = DATA_DIR / "add_leads_crm_with_client.json"
-    leads_csv = DATA_DIR / "add_leads_crm_flat_datalens.csv"
+    client_data_dir = VAR_DIR / "data" / client_slug
+    client_data_dir.mkdir(parents=True, exist_ok=True)
+
+    leads_json = client_data_dir / "add_leads_crm.json"
+    leads_with_client_json = client_data_dir / "add_leads_crm_with_client.json"
+    leads_csv = client_data_dir / "add_leads_crm_flat_datalens.csv"
+
+    log("Контекст клиента (leads):")
+    log(f"- client_slug={client_slug}")
+    log(f"- client_id={client_id}")
+    log(f"- leads_json={leads_json}")
+    log(f"- leads_with_client_json={leads_with_client_json}")
+    log(f"- leads_csv={leads_csv}")
 
     # 1) Выгрузка лидов из amoCRM
     run_step(
-        ["scripts/amocrm_export_leads.py"],
+        ["scripts/amocrm_export_leads.py", "--client-slug", client_slug, "--out", str(leads_json)],
         "Лиды: шаг 1/4 — выгрузка лидов из amoCRM",
         log,
     )
@@ -143,7 +154,15 @@ def run_leads_pipeline(client_slug: str, log) -> None:
 
     # 2) Добавление client_id / client_slug в JSON
     run_step(
-        ["scripts/add_client_id.py"],
+        [
+            "scripts/add_client_id.py",
+            "--client-slug",
+            client_slug,
+            "--in",
+            str(leads_json),
+            "--out",
+            str(leads_with_client_json),
+        ],
         "Лиды: шаг 2/4 — добавление client_id/client_slug в JSON",
         log,
     )
@@ -151,7 +170,15 @@ def run_leads_pipeline(client_slug: str, log) -> None:
 
     # 3) Построение плоского CSV для DataLens/ClickHouse
     run_step(
-        ["scripts/leads_json_to_datalens_csv.py", client_slug],
+        [
+            "scripts/leads_json_to_datalens_csv.py",
+            "--client-slug",
+            client_slug,
+            "--in",
+            str(leads_with_client_json),
+            "--out",
+            str(leads_csv),
+        ],
         "Лиды: шаг 3/4 — преобразование JSON в плоский CSV для отчётности",
         log,
     )
@@ -174,7 +201,13 @@ def run_leads_pipeline(client_slug: str, log) -> None:
 
     # 4) Загрузка факта лидов в ClickHouse
     run_step(
-        ["scripts/load_leads_csv_to_clickhouse.py"],
+        [
+            "scripts/load_leads_csv_to_clickhouse.py",
+            "--client-slug",
+            client_slug,
+            "--csv-path",
+            str(leads_csv),
+        ],
         "Лиды: шаг 4/4 — загрузка CSV в ClickHouse",
         log,
     )
@@ -186,12 +219,21 @@ def run_dims_pipeline(client_slug: str, log) -> None:
     client_id = get_client_id(client_slug)
     log(f"##### Запуск пайплайна справочников для клиента: {client_slug} (id={client_id}) #####")
 
-    loss_csv = DATA_DIR / "loss_reasons.csv"
-    statuses_csv = DATA_DIR / "pipelines_statuses_dim.csv"
+    client_data_dir = VAR_DIR / "data" / client_slug
+    client_data_dir.mkdir(parents=True, exist_ok=True)
+
+    loss_csv = client_data_dir / "loss_reasons.csv"
+    statuses_csv = client_data_dir / "pipelines_statuses_dim.csv"
+
+    log("Контекст клиента (dims):")
+    log(f"- client_slug={client_slug}")
+    log(f"- client_id={client_id}")
+    log(f"- loss_csv={loss_csv}")
+    log(f"- statuses_csv={statuses_csv}")
 
     # 1) Выгрузка причин потерь
     run_step(
-        ["scripts/export_loss_reasons.py"],
+        ["scripts/export_loss_reasons.py", "--client-slug", client_slug, "--out", str(loss_csv)],
         "Справочники: шаг 1/4 — выгрузка причин потерь из amoCRM",
         log,
     )
@@ -210,14 +252,20 @@ def run_dims_pipeline(client_slug: str, log) -> None:
 
     # 2) Загрузка причин потерь в ClickHouse
     run_step(
-        ["scripts/load_loss_reasons_dim_to_clickhouse.py"],
+        [
+            "scripts/load_loss_reasons_dim_to_clickhouse.py",
+            "--client-slug",
+            client_slug,
+            "--csv-path",
+            str(loss_csv),
+        ],
         "Справочники: шаг 2/4 — загрузка loss_reasons в ClickHouse",
         log,
     )
 
     # 3) Выгрузка статусов по пайплайнам
     run_step(
-        ["scripts/amocrm_get_statuses_dim.py"],
+        ["scripts/amocrm_get_statuses_dim.py", "--client-slug", client_slug, "--out", str(statuses_csv)],
         "Справочники: шаг 3/4 — выгрузка статусов по пайплайнам из amoCRM",
         log,
     )
@@ -240,7 +288,13 @@ def run_dims_pipeline(client_slug: str, log) -> None:
 
     # 4) Загрузка статусов в ClickHouse
     run_step(
-        ["scripts/load_statuses_dim_to_clickhouse.py"],
+        [
+            "scripts/load_statuses_dim_to_clickhouse.py",
+            "--client-slug",
+            client_slug,
+            "--csv-path",
+            str(statuses_csv),
+        ],
         "Справочники: шаг 4/4 — загрузка статусов в ClickHouse",
         log,
     )
@@ -283,7 +337,9 @@ def main() -> None:
 
     client_slug = args.client_slug
     log, log_path = make_logger(client_slug)
-    log(f"Старт пайплайна для клиента '{client_slug}'. Лог-файл: {log_path}")
+    client_id = get_client_id(client_slug)
+    log(f"Старт пайплайна для клиента '{client_slug}' (id={client_id}). Лог-файл: {log_path}")
+    log(f"Артефакты будут писаться в: {VAR_DIR / 'data' / client_slug}")
     started_at = time.monotonic()
 
     try:
