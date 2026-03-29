@@ -1,0 +1,3 @@
+pandas
+clickhouse-connect
+psycopg2-binary

@@ -1,9 +1,9 @@
 import json
+import os
 import time
 import urllib.request
-from urllib.error import HTTPError, URLError
 from pathlib import Path
-import os
+from urllib.error import HTTPError, URLError
 
 
 # -------- Paths --------
@@ -31,7 +31,7 @@ def _resolve_secrets_paths(client_slug: str | None) -> tuple[Path, Path]:
     - Else fall back to legacy files if they exist
     """
     env_slug = os.getenv("AMOCRM_CLIENT_SLUG", "").strip() or None
-    slug = (client_slug or env_slug)
+    slug = client_slug or env_slug
 
     secrets_dir = Path(os.getenv("AMOCRM_SECRETS_DIR", str(SECRETS_DIR))).expanduser()
 
@@ -88,7 +88,7 @@ def post_json(url: str, payload: dict) -> dict:
         url=url,
         data=data,
         headers={"Content-Type": "application/json"},
-        method="POST"
+        method="POST",
     )
 
     try:
@@ -104,11 +104,117 @@ def post_json(url: str, payload: dict) -> dict:
         raise AmoClientError("Не удалось разобрать JSON-ответ сервера.")
 
 
-def get_valid_access_token(client_slug: str | None = None) -> tuple[str, str]:
+def _resolve_oauth_app_credentials() -> tuple[str, str]:
     """
-    Возвращает (account_domain, access_token).
-    Если access_token истёк — обновляет по refresh_token и сохраняет новые токены.
+    Учётные данные OAuth-приложения amoCRM из env.
+    Сначала новые имена, затем legacy — чтобы не ломать существующие деплои.
     """
+    cid = (os.getenv("AMOCRM_OAUTH_CLIENT_ID") or "").strip()
+    secret = (os.getenv("AMOCRM_OAUTH_CLIENT_SECRET") or "").strip()
+    if cid and secret:
+        return cid, secret
+
+    cid = (os.getenv("AMOCRM_CLIENT_ID") or "").strip()
+    secret = (os.getenv("AMOCRM_CLIENT_SECRET") or "").strip()
+    if cid and secret:
+        return cid, secret
+
+    raise AmoClientError(
+        "Задай OAuth-приложение amoCRM через переменные окружения: "
+        "AMOCRM_OAUTH_CLIENT_ID и AMOCRM_OAUTH_CLIENT_SECRET (предпочтительно), "
+        "либо для обратной совместимости AMOCRM_CLIENT_ID и AMOCRM_CLIENT_SECRET."
+    )
+
+
+def _config_source() -> str:
+    """
+    ETL_CONFIG_SOURCE=postgres|legacy
+    По умолчанию legacy — чтобы не ломать существующие установки без PostgreSQL.
+    """
+    v = (os.getenv("ETL_CONFIG_SOURCE") or "legacy").strip().lower()
+    if v not in ("postgres", "legacy"):
+        raise AmoClientError(
+            f"Некорректный ETL_CONFIG_SOURCE={v!r}. Ожидается 'postgres' или 'legacy'."
+        )
+    return v
+
+
+def _get_valid_access_token_postgres(client_slug: str | None) -> tuple[str, str]:
+    # Ленивый импорт: при legacy не требуется psycopg2
+    from datetime import datetime, timezone
+
+    from scripts.client_registry import ClientRegistryError, resolve_client_context
+    from scripts.token_store import TokenStoreError, load_tokens, save_tokens_after_refresh
+
+    env_slug = os.getenv("AMOCRM_CLIENT_SLUG", "").strip() or None
+    slug = client_slug or env_slug
+    if not slug:
+        raise AmoClientError(
+            "Для ETL_CONFIG_SOURCE=postgres нужен client_slug в вызове "
+            "get_valid_access_token(client_slug) или env AMOCRM_CLIENT_SLUG."
+        )
+
+    amo_app_id, amo_app_secret = _resolve_oauth_app_credentials()
+
+    try:
+        ctx = resolve_client_context(slug)
+    except ClientRegistryError as e:
+        raise AmoClientError(str(e)) from e
+
+    if not ctx.is_enabled:
+        raise AmoClientError(f"Клиент отключён (is_enabled=false): slug={slug!r}")
+
+    account_domain = ctx.account_domain.rstrip("/")
+
+    try:
+        access_token, refresh_token, expires_at_utc = load_tokens(ctx.integration_id)
+    except TokenStoreError as e:
+        raise AmoClientError(str(e)) from e
+
+    now = int(time.time())
+    expires_at_unix = int(expires_at_utc.timestamp())
+
+    if access_token and refresh_token and now < expires_at_unix:
+        return account_domain, access_token
+
+    if not access_token or not refresh_token:
+        raise AmoClientError(
+            "Токены в БД неполные. Заполни amocrm_oauth_tokens или выполни первичный OAuth."
+        )
+
+    url = f"{account_domain}/oauth2/access_token"
+    payload = {
+        "client_id": amo_app_id,
+        "client_secret": amo_app_secret,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+
+    new_tokens = post_json(url, payload)
+    expires_in = int(new_tokens.get("expires_in", 0))
+    if not expires_in:
+        raise AmoClientError(f"Неожиданный ответ при refresh: {new_tokens}")
+
+    new_access = new_tokens.get("access_token", "")
+    new_refresh = new_tokens.get("refresh_token", "")
+    if not new_access or not new_refresh:
+        raise AmoClientError(f"В ответе refresh нет access/refresh: {new_tokens}")
+
+    exp_utc = datetime.fromtimestamp(now + expires_in - 60, tz=timezone.utc)
+    try:
+        save_tokens_after_refresh(
+            ctx.integration_id,
+            new_access,
+            new_refresh,
+            exp_utc,
+        )
+    except TokenStoreError as e:
+        raise AmoClientError(str(e)) from e
+
+    return account_domain, new_access
+
+
+def _get_valid_access_token_legacy(client_slug: str | None) -> tuple[str, str]:
     app_path, tokens_path = _resolve_secrets_paths(client_slug)
     cfg = load_json(app_path)
 
@@ -129,26 +235,25 @@ def get_valid_access_token(client_slug: str | None = None) -> tuple[str, str]:
     expires_at = int(tokens.get("expires_at", 0))
 
     if not access_token or not refresh_token or not expires_at:
-        raise AmoClientError("Файл токенов неполный. Пересоздай токены через oauth_exchange_tokens.py")
+        raise AmoClientError(
+            "Файл токенов неполный. Пересоздай токены через oauth_exchange_tokens.py"
+        )
 
     now = int(time.time())
 
-    # Если токен ещё жив — возвращаем его
     if now < expires_at:
         return account_domain, access_token
 
-    # Иначе refresh
     url = f"{account_domain}/oauth2/access_token"
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
         "grant_type": "refresh_token",
-        "refresh_token": refresh_token
+        "refresh_token": refresh_token,
     }
 
     new_tokens = post_json(url, payload)
 
-    # expires_at пересчитываем
     expires_in = int(new_tokens.get("expires_in", 0))
     if not expires_in:
         raise AmoClientError(f"Неожиданный ответ при refresh: {new_tokens}")
@@ -157,7 +262,7 @@ def get_valid_access_token(client_slug: str | None = None) -> tuple[str, str]:
         "access_token": new_tokens.get("access_token", ""),
         "refresh_token": new_tokens.get("refresh_token", ""),
         "expires_at": int(time.time()) + expires_in - 60,
-        "token_type": new_tokens.get("token_type", "Bearer")
+        "token_type": new_tokens.get("token_type", "Bearer"),
     }
 
     if not out["access_token"] or not out["refresh_token"]:
@@ -167,11 +272,26 @@ def get_valid_access_token(client_slug: str | None = None) -> tuple[str, str]:
     return account_domain, out["access_token"]
 
 
+def get_valid_access_token(client_slug: str | None = None) -> tuple[str, str]:
+    """
+    Возвращает (account_domain, access_token).
+    Если access_token истёк — обновляет по refresh_token и сохраняет новые токены.
+
+    Источник конфигурации:
+      ETL_CONFIG_SOURCE=postgres — clients / amocrm_integrations / amocrm_oauth_tokens + env OAuth app
+      ETL_CONFIG_SOURCE=legacy (по умолчанию) — secrets/*.json как раньше
+    """
+    src = _config_source()
+    if src == "postgres":
+        return _get_valid_access_token_postgres(client_slug)
+    return _get_valid_access_token_legacy(client_slug)
+
+
 def get_json(url: str, access_token: str) -> dict:
     req = urllib.request.Request(
         url=url,
         headers={"Authorization": f"Bearer {access_token}"},
-        method="GET"
+        method="GET",
     )
 
     try:
