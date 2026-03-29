@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import os
 
+from scripts.load_dev_env import load_local_env_files
+
+load_local_env_files()
+
 import psycopg2
 from psycopg2.extensions import connection as PgConnection
 
