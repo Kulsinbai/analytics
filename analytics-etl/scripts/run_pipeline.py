@@ -4,7 +4,7 @@ import json
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # чтобы работал импорт "from scripts...." при запуске файла напрямую:
@@ -18,10 +18,42 @@ from scripts.load_dev_env import load_local_env_files
 load_local_env_files()
 
 from scripts.clients_map import get_client_id
+from scripts.sync_state import get_watermark, save_last_error, save_watermark, touch_last_success
 
 DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
 VAR_DIR = BASE_DIR / "var"
+
+# Назад от сохранённого watermark, чтобы перекрыть граничные обновления / задержки API.
+DEFAULT_LEADS_OVERLAP = timedelta(minutes=10)
+
+ENTITY_LEADS = "leads"
+
+
+def max_updated_dt_from_csv(path: Path, log) -> datetime | None:
+    """Максимум колонки updated_dt в CSV лидов (UTC)."""
+    if not path.exists():
+        log(f"ERROR: CSV не найден для max(updated_dt): {path}")
+        return None
+    max_dt: datetime | None = None
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f, delimiter=";")
+            for row in reader:
+                u = (row.get("updated_dt") or "").strip()
+                if not u:
+                    continue
+                try:
+                    dt = datetime.strptime(u[:19], "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue
+                dt = dt.replace(tzinfo=timezone.utc)
+                if max_dt is None or dt > max_dt:
+                    max_dt = dt
+    except Exception as e:
+        log(f"ERROR: не удалось прочитать CSV для max(updated_dt): {e}")
+        return None
+    return max_dt
 
 
 def make_logger(client_slug: str):
@@ -69,7 +101,13 @@ def run_step(cmd: list[str], description: str, log) -> None:
     log(f"✔ Шаг '{description}' успешно выполнен за {duration:.1f} c")
 
 
-def count_csv_rows(path: Path, log, required_cols: list[str] | None = None) -> int:
+def count_csv_rows(
+    path: Path,
+    log,
+    required_cols: list[str] | None = None,
+    *,
+    allow_zero: bool = False,
+) -> int:
     if not path.exists():
         log(f"ERROR: CSV не найден: {path}")
         return -1
@@ -93,6 +131,9 @@ def count_csv_rows(path: Path, log, required_cols: list[str] | None = None) -> i
 
     log(f"CSV '{path.name}': строк данных (без заголовка) = {row_count}")
     if row_count == 0:
+        if allow_zero:
+            log(f"CSV '{path.name}': 0 строк — допустимо для инкрементального режима.")
+            return 0
         log(f"ERROR: CSV '{path.name}' не содержит ни одной строки данных.")
         return -1
 
@@ -130,8 +171,25 @@ def count_json_leads(path: Path, log) -> int:
     return n
 
 
-def run_leads_pipeline(client_slug: str, log) -> None:
+def run_leads_pipeline(client_slug: str, log, *, full_refresh_leads: bool = False) -> None:
     client_id = get_client_id(client_slug)
+    try:
+        _run_leads_pipeline_impl(client_slug, log, client_id=client_id, full_refresh_leads=full_refresh_leads)
+    except Exception as e:
+        try:
+            save_last_error(client_id, ENTITY_LEADS, str(e))
+        except Exception:
+            pass
+        raise
+
+
+def _run_leads_pipeline_impl(
+    client_slug: str,
+    log,
+    *,
+    client_id: int,
+    full_refresh_leads: bool = False,
+) -> None:
     log(f"##### Запуск пайплайна лидов для клиента: {client_slug} (id={client_id}) #####")
 
     client_data_dir = VAR_DIR / "data" / client_slug
@@ -148,9 +206,33 @@ def run_leads_pipeline(client_slug: str, log) -> None:
     log(f"- leads_with_client_json={leads_with_client_json}")
     log(f"- leads_csv={leads_csv}")
 
+    incremental_ch = False
+    since_dt: datetime | None = None
+    if not full_refresh_leads:
+        try:
+            wm = get_watermark(client_id, ENTITY_LEADS)
+        except Exception as e:
+            log(f"✖ Не удалось прочитать watermark из etl_sync_state: {e}")
+            raise
+        if wm is not None:
+            since_dt = wm - DEFAULT_LEADS_OVERLAP
+            incremental_ch = True
+            log(
+                f"Инкремент лидов: watermark={wm.isoformat()}, "
+                f"since_updated_at (с overlap {DEFAULT_LEADS_OVERLAP})={since_dt.isoformat()}"
+            )
+        else:
+            log("Watermark для лидов не задан — полная выгрузка из amoCRM (как раньше).")
+    else:
+        log("Режим полной выгрузки лидов (--leads-full-refresh): filter[updated_at] не используется.")
+
     # 1) Выгрузка лидов из amoCRM
+    export_cmd = ["scripts/amocrm_export_leads.py", "--client-slug", client_slug, "--out", str(leads_json)]
+    if since_dt is not None:
+        since_str = since_dt.strftime("%Y-%m-%d %H:%M:%S")
+        export_cmd += ["--since-updated-at", since_str]
     run_step(
-        ["scripts/amocrm_export_leads.py", "--client-slug", client_slug, "--out", str(leads_json)],
+        export_cmd,
         "Лиды: шаг 1/4 — выгрузка лидов из amoCRM",
         log,
     )
@@ -199,22 +281,53 @@ def run_leads_pipeline(client_slug: str, log) -> None:
         "client_slug",
         "name",
     ]
-    rows_csv = count_csv_rows(leads_csv, log, leads_required_cols)
+    rows_csv = count_csv_rows(
+        leads_csv,
+        log,
+        leads_required_cols,
+        allow_zero=incremental_ch,
+    )
     if rows_csv < 0:
         raise RuntimeError("Валидация CSV лидов не пройдена, загрузка в ClickHouse отменена.")
 
+    if incremental_ch and rows_csv == 0:
+        log(
+            "Инкремент: в окне нет изменённых лидов — шаг ClickHouse пропущен, watermark не меняем."
+        )
+        try:
+            touch_last_success(client_id, ENTITY_LEADS)
+        except Exception as e:
+            log(f"WARNING: не удалось обновить last_success_at в etl_sync_state: {e}")
+        log(f"##### Пайплайн лидов для {client_slug} (id={client_id}) завершён успешно #####")
+        return
+
     # 4) Загрузка факта лидов в ClickHouse
+    load_cmd = [
+        "scripts/load_leads_csv_to_clickhouse.py",
+        "--client-slug",
+        client_slug,
+        "--csv-path",
+        str(leads_csv),
+    ]
+    if incremental_ch:
+        load_cmd.append("--incremental")
     run_step(
-        [
-            "scripts/load_leads_csv_to_clickhouse.py",
-            "--client-slug",
-            client_slug,
-            "--csv-path",
-            str(leads_csv),
-        ],
+        load_cmd,
         "Лиды: шаг 4/4 — загрузка CSV в ClickHouse",
         log,
     )
+
+    if rows_csv > 0:
+        mx = max_updated_dt_from_csv(leads_csv, log)
+        if mx is not None:
+            try:
+                save_watermark(client_id, ENTITY_LEADS, mx)
+                log(f"Watermark лидов обновлён: max(updated_dt)={mx.isoformat()}")
+            except Exception as e:
+                log(f"✖ Не удалось сохранить watermark в etl_sync_state: {e}")
+                raise
+        else:
+            log("WARNING: не вычислен max(updated_dt) по CSV — watermark не обновлён.")
 
     log(f"##### Пайплайн лидов для {client_slug} (id={client_id}) завершён успешно #####")
 
@@ -331,6 +444,11 @@ def main() -> None:
         action="store_true",
         help="Полный refresh: справочники + лиды (dims → leads)",
     )
+    parser.add_argument(
+        "--leads-full-refresh",
+        action="store_true",
+        help="Для пайплайна лидов: полная выгрузка из amoCRM и полная перезапись по client_id в ClickHouse (без инкремента).",
+    )
 
     args = parser.parse_args()
 
@@ -347,15 +465,16 @@ def main() -> None:
     started_at = time.monotonic()
 
     try:
+        lfr = bool(args.leads_full_refresh)
         if args.all:
             # Полный refresh в заданном порядке: dims → leads
             run_dims_pipeline(client_slug, log)
-            run_leads_pipeline(client_slug, log)
+            run_leads_pipeline(client_slug, log, full_refresh_leads=lfr)
         else:
             if args.dims:
                 run_dims_pipeline(client_slug, log)
             if args.leads:
-                run_leads_pipeline(client_slug, log)
+                run_leads_pipeline(client_slug, log, full_refresh_leads=lfr)
     except Exception as e:
         log(f"✖ Пайплайн завершился с ошибкой: {e}")
         total = time.monotonic() - started_at
