@@ -6,6 +6,9 @@
 
 override=False: не перезаписывает переменные, уже заданные в окружении процесса
 (типичный production: значения из systemd / k8s / CI остаются приоритетными).
+
+Точки входа ETL вызывают load_local_env_files() в начале (run_pipeline, loaders и т.д.);
+импорт только scripts.db больше не обязателен для подгрузки .env.
 """
 
 from __future__ import annotations

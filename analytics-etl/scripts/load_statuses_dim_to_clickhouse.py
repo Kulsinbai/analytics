@@ -7,6 +7,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from scripts.load_dev_env import load_local_env_files
+
+load_local_env_files()
+
 import csv
 from datetime import datetime
 from pathlib import Path

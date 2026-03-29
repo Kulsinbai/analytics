@@ -126,6 +126,75 @@ def _resolve_oauth_app_credentials() -> tuple[str, str]:
     )
 
 
+def _oauth_app_credentials_from_env_fallback() -> tuple[str, str] | None:
+    """
+    Временный fallback для ETL_CONFIG_SOURCE=postgres, если в amocrm_integrations
+    пустые amo_oauth_client_id / amo_oauth_client_secret.
+    Те же имена переменных, что в _resolve_oauth_app_credentials.
+    """
+    cid = (os.getenv("AMOCRM_OAUTH_CLIENT_ID") or "").strip()
+    secret = (os.getenv("AMOCRM_OAUTH_CLIENT_SECRET") or "").strip()
+    if cid and secret:
+        return cid, secret
+
+    cid = (os.getenv("AMOCRM_CLIENT_ID") or "").strip()
+    secret = (os.getenv("AMOCRM_CLIENT_SECRET") or "").strip()
+    if cid and secret:
+        return cid, secret
+
+    return None
+
+
+def _oauth_credentials_for_postgres_refresh(ctx) -> tuple[str, str]:
+    """Пара для refresh: сначала БД (per-client), иначе env fallback."""
+    cid = (ctx.amo_oauth_client_id or "").strip()
+    secret = (ctx.amo_oauth_client_secret or "").strip()
+    if cid and secret:
+        return cid, secret
+
+    fb = _oauth_app_credentials_from_env_fallback()
+    if fb:
+        return fb
+
+    raise AmoClientError(
+        "Не заданы OAuth client_id/client_secret для refresh токена amoCRM: "
+        "заполни поля amocrm_integrations.amo_oauth_client_id и amo_oauth_client_secret "
+        "или временно задай переменные окружения AMOCRM_OAUTH_CLIENT_ID и "
+        "AMOCRM_OAUTH_CLIENT_SECRET (либо AMOCRM_CLIENT_ID и AMOCRM_CLIENT_SECRET)."
+    )
+
+
+def _oauth_redirect_uri_for_postgres_refresh(ctx) -> str | None:
+    """
+    redirect_uri должен совпадать с тем, что в интеграции amoCRM и при выдаче refresh.
+    Сначала колонка БД, затем env (как временный fallback при миграции схемы).
+    """
+    u = (ctx.amo_oauth_redirect_uri or "").strip()
+    if u:
+        return u
+    u = (os.getenv("AMOCRM_OAUTH_REDIRECT_URI") or "").strip()
+    if u:
+        return u
+    return None
+
+
+def _refresh_token_request_payload(
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    redirect_uri: str | None,
+) -> dict:
+    payload = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    if redirect_uri:
+        payload["redirect_uri"] = redirect_uri.strip()
+    return payload
+
+
 def _config_source() -> str:
     """
     ETL_CONFIG_SOURCE=postgres|legacy
@@ -154,8 +223,6 @@ def _get_valid_access_token_postgres(client_slug: str | None) -> tuple[str, str]
             "get_valid_access_token(client_slug) или env AMOCRM_CLIENT_SLUG."
         )
 
-    amo_app_id, amo_app_secret = _resolve_oauth_app_credentials()
-
     try:
         ctx = resolve_client_context(slug)
     except ClientRegistryError as e:
@@ -182,13 +249,16 @@ def _get_valid_access_token_postgres(client_slug: str | None) -> tuple[str, str]
             "Токены в БД неполные. Заполни amocrm_oauth_tokens или выполни первичный OAuth."
         )
 
+    amo_app_id, amo_app_secret = _oauth_credentials_for_postgres_refresh(ctx)
+    redirect_uri = _oauth_redirect_uri_for_postgres_refresh(ctx)
+
     url = f"{account_domain}/oauth2/access_token"
-    payload = {
-        "client_id": amo_app_id,
-        "client_secret": amo_app_secret,
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }
+    payload = _refresh_token_request_payload(
+        amo_app_id,
+        amo_app_secret,
+        refresh_token,
+        redirect_uri,
+    )
 
     new_tokens = post_json(url, payload)
     expires_in = int(new_tokens.get("expires_in", 0))
@@ -244,13 +314,18 @@ def _get_valid_access_token_legacy(client_slug: str | None) -> tuple[str, str]:
     if now < expires_at:
         return account_domain, access_token
 
+    redirect_uri = None
+    ru = str(cfg.get("redirect_uri", "") or "").strip()
+    if ru:
+        redirect_uri = ru
+
     url = f"{account_domain}/oauth2/access_token"
-    payload = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }
+    payload = _refresh_token_request_payload(
+        client_id,
+        client_secret,
+        refresh_token,
+        redirect_uri,
+    )
 
     new_tokens = post_json(url, payload)
 
@@ -278,7 +353,9 @@ def get_valid_access_token(client_slug: str | None = None) -> tuple[str, str]:
     Если access_token истёк — обновляет по refresh_token и сохраняет новые токены.
 
     Источник конфигурации:
-      ETL_CONFIG_SOURCE=postgres — clients / amocrm_integrations / amocrm_oauth_tokens + env OAuth app
+      ETL_CONFIG_SOURCE=postgres — clients / amocrm_integrations (OAuth app: client_id, secret,
+        redirect_uri в amo_oauth_redirect_uri) и amocrm_oauth_tokens; при пустых полях в БД —
+        временный fallback OAuth из env (в т.ч. AMOCRM_OAUTH_REDIRECT_URI для refresh)
       ETL_CONFIG_SOURCE=legacy (по умолчанию) — secrets/*.json как раньше
     """
     src = _config_source()

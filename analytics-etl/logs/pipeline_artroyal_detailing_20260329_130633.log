@@ -1,0 +1,53 @@
+[2026-03-29 13:06:33] Старт пайплайна для клиента 'artroyal_detailing' (id=1). Лог-файл: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/logs/pipeline_artroyal_detailing_20260329_130633.log
+[2026-03-29 13:06:33] Артефакты будут писаться в: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing
+[2026-03-29 13:06:33] ##### Запуск пайплайна лидов для клиента: artroyal_detailing (id=1) #####
+[2026-03-29 13:06:33] Контекст клиента (leads):
+[2026-03-29 13:06:33] - client_slug=artroyal_detailing
+[2026-03-29 13:06:33] - client_id=1
+[2026-03-29 13:06:33] - leads_json=/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm.json
+[2026-03-29 13:06:33] - leads_with_client_json=/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_with_client.json
+[2026-03-29 13:06:33] - leads_csv=/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_flat_datalens.csv
+[2026-03-29 13:06:33] === START: Лиды: шаг 1/4 — выгрузка лидов из amoCRM ===
+[2026-03-29 13:06:33] Команда: scripts/amocrm_export_leads.py --client-slug artroyal_detailing --out /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm.json
+[2026-03-29 13:06:36] [stderr] Traceback (most recent call last):
+[2026-03-29 13:06:36] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/scripts/amocrm_client.py", line 95, in post_json
+[2026-03-29 13:06:36] [stderr]     with urllib.request.urlopen(req, timeout=30) as resp:
+[2026-03-29 13:06:36] [stderr]          ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[2026-03-29 13:06:36] [stderr]   File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+[2026-03-29 13:06:36] [stderr]     return opener.open(url, data, timeout)
+[2026-03-29 13:06:36] [stderr]            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+[2026-03-29 13:06:36] [stderr]   File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 493, in open
+[2026-03-29 13:06:36] [stderr]     response = meth(req, response)
+[2026-03-29 13:06:36] [stderr]   File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 602, in http_response
+[2026-03-29 13:06:36] [stderr]     response = self.parent.error(
+[2026-03-29 13:06:36] [stderr]         'http', request, response, code, msg, hdrs)
+[2026-03-29 13:06:36] [stderr]   File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 531, in error
+[2026-03-29 13:06:36] [stderr]     return self._call_chain(*args)
+[2026-03-29 13:06:36] [stderr]            ~~~~~~~~~~~~~~~~^^^^^^^
+[2026-03-29 13:06:36] [stderr]   File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+[2026-03-29 13:06:36] [stderr]     result = func(*args)
+[2026-03-29 13:06:36] [stderr]   File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 611, in http_error_default
+[2026-03-29 13:06:36] [stderr]     raise HTTPError(req.full_url, code, msg, hdrs, fp)
+[2026-03-29 13:06:36] [stderr] urllib.error.HTTPError: HTTP Error 401: Unauthorized
+[2026-03-29 13:06:36] [stderr] 
+[2026-03-29 13:06:36] [stderr] During handling of the above exception, another exception occurred:
+[2026-03-29 13:06:36] [stderr] 
+[2026-03-29 13:06:36] [stderr] Traceback (most recent call last):
+[2026-03-29 13:06:36] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/scripts/amocrm_export_leads.py", line 47, in <module>
+[2026-03-29 13:06:36] [stderr]     main()
+[2026-03-29 13:06:36] [stderr]     ~~~~^^
+[2026-03-29 13:06:36] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/scripts/amocrm_export_leads.py", line 26, in main
+[2026-03-29 13:06:36] [stderr]     account_domain, access_token = get_valid_access_token(client_slug)
+[2026-03-29 13:06:36] [stderr]                                    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+[2026-03-29 13:06:36] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/scripts/amocrm_client.py", line 325, in get_valid_access_token
+[2026-03-29 13:06:36] [stderr]     return _get_valid_access_token_postgres(client_slug)
+[2026-03-29 13:06:36] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/scripts/amocrm_client.py", line 231, in _get_valid_access_token_postgres
+[2026-03-29 13:06:36] [stderr]     new_tokens = post_json(url, payload)
+[2026-03-29 13:06:36] [stderr]   File "/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/scripts/amocrm_client.py", line 100, in post_json
+[2026-03-29 13:06:36] [stderr]     raise AmoClientError(f"HTTP {e.code} при POST {url}\nОтвет:\n{body}")
+[2026-03-29 13:06:36] [stderr] scripts.amocrm_client.AmoClientError: HTTP 401 при POST https://artroyaldetailing.amocrm.ru/oauth2/access_token
+[2026-03-29 13:06:36] [stderr] Ответ:
+[2026-03-29 13:06:36] [stderr] {"hint":"Token has been expired","title":"Некорректный запрос","type":"https://developers.amocrm.ru/v3/errors/OAuthProblemJson","status":401,"detail":"В запросе отсутствует ряд параметров или параметры невалидны"}
+[2026-03-29 13:06:36] ✖ Шаг 'Лиды: шаг 1/4 — выгрузка лидов из amoCRM' завершился с ошибкой, код=1, время=2.6 c
+[2026-03-29 13:06:36] ✖ Пайплайн завершился с ошибкой: Step failed: Лиды: шаг 1/4 — выгрузка лидов из amoCRM
+[2026-03-29 13:06:36] Итоговое время выполнения (c ошибкой): 2.6 c
