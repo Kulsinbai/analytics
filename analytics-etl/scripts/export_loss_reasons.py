@@ -29,7 +29,11 @@ def unix_to_dt_str(value):
 def main():
     try:
         p = argparse.ArgumentParser(description="Выгрузка loss_reasons из amoCRM в CSV (safe multi-client).")
-        p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+        p.add_argument(
+            "--client-slug",
+            required=True,
+            help="client_slug клиента (PostgreSQL / client_registry; fallback — clients_map)",
+        )
         p.add_argument("--out", dest="out_path", default=None, help="Путь к выходному CSV")
         args = p.parse_args()
 

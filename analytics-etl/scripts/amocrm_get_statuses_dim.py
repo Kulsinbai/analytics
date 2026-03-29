@@ -22,7 +22,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 def main():
     p = argparse.ArgumentParser(description="Выгрузка pipelines/statuses из amoCRM в CSV (safe multi-client).")
-    p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+    p.add_argument(
+        "--client-slug",
+        required=True,
+        help="client_slug клиента (PostgreSQL / client_registry; fallback — clients_map)",
+    )
     p.add_argument("--out", dest="out_path", default=None, help="Путь к выходному CSV")
     args = p.parse_args()
 

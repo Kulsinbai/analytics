@@ -310,7 +310,7 @@ def main() -> None:
         "--client-slug",
         dest="client_slug",
         required=True,
-        help="client_slug из scripts/clients_map.py (например, artroyal_detailing)",
+        help="client_slug клиента (PostgreSQL / client_registry; например artroyal_detailing)",
     )
     parser.add_argument(
         "--leads",

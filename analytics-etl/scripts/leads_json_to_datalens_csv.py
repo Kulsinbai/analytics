@@ -170,7 +170,12 @@ if __name__ == "__main__":
     # - new style: python leads_json_to_datalens_csv.py --client-slug <slug> --in ... --out ...
     p = argparse.ArgumentParser(description="Преобразование лидов JSON → плоский CSV (safe multi-client).")
     p.add_argument("client_slug_pos", nargs="?", help="(legacy) client_slug позиционным аргументом")
-    p.add_argument("--client-slug", dest="client_slug", default=None, help="client_slug из scripts/clients_map.py")
+    p.add_argument(
+        "--client-slug",
+        dest="client_slug",
+        default=None,
+        help="client_slug клиента (PostgreSQL / client_registry; fallback — clients_map)",
+    )
     p.add_argument("--in", dest="in_path", default=str(DEFAULT_INPUT_FILE), help="Путь к входному JSON")
     p.add_argument("--out", dest="out_path", default=str(DEFAULT_OUTPUT_FILE), help="Путь к выходному CSV")
     args = p.parse_args()

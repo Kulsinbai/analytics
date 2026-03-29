@@ -72,7 +72,11 @@ def _apply_client_fields(data, client_id: int, client_slug: str) -> int:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Добавляет client_id/client_slug в JSON с защитой от смешения клиента.")
-    p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py (например, artroyal_detailing)")
+    p.add_argument(
+        "--client-slug",
+        required=True,
+        help="client_slug клиента (PostgreSQL / client_registry; например artroyal_detailing)",
+    )
     p.add_argument("--in", dest="in_path", default=str(DEFAULT_INPUT_FILE), help="Путь к входному JSON")
     p.add_argument("--out", dest="out_path", default=str(DEFAULT_OUTPUT_FILE), help="Путь к выходному JSON")
     args = p.parse_args()

@@ -132,7 +132,11 @@ def _assert_csv_matches_client(df: pd.DataFrame, client_id: int, client_slug: st
 
 def main():
     p = argparse.ArgumentParser(description="Загрузка leads_fact в ClickHouse (safe multi-client).")
-    p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+    p.add_argument(
+        "--client-slug",
+        required=True,
+        help="client_slug клиента (PostgreSQL / client_registry; fallback — clients_map)",
+    )
     p.add_argument("--csv-path", default=str(DEFAULT_LEADS_CSV), help="Путь к CSV add_leads_crm_flat_datalens.csv")
     p.add_argument("--ch-table", default=DEFAULT_TABLE, help="Имя таблицы ClickHouse (без БД)")
     p.add_argument("--dry-run", action="store_true", help="Не выполнять DELETE/INSERT, только проверки и план действий")

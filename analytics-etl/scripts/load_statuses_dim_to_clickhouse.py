@@ -61,7 +61,11 @@ def _clickhouse_client():
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Загрузка statuses_dim в ClickHouse (safe multi-client).")
-    p.add_argument("--client-slug", required=True, help="client_slug из scripts/clients_map.py")
+    p.add_argument(
+        "--client-slug",
+        required=True,
+        help="client_slug клиента (PostgreSQL / client_registry; fallback — clients_map)",
+    )
     p.add_argument("--csv-path", default=str(DEFAULT_CSV_PATH), help="Путь к CSV pipelines_statuses_dim.csv")
     p.add_argument("--ch-table", default=DEFAULT_TABLE, help="Имя таблицы ClickHouse (без БД)")
     p.add_argument("--dry-run", action="store_true", help="Не выполнять DELETE/INSERT, только проверки и план действий")
