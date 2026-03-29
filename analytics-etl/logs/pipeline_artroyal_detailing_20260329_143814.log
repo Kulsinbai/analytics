@@ -1,0 +1,39 @@
+[2026-03-29 14:38:14] Старт пайплайна для клиента 'artroyal_detailing' (id=1). Лог-файл: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/logs/pipeline_artroyal_detailing_20260329_143814.log
+[2026-03-29 14:38:14] Артефакты будут писаться в: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing
+[2026-03-29 14:38:14] ##### Запуск пайплайна лидов для клиента: artroyal_detailing (id=1) #####
+[2026-03-29 14:38:14] Контекст клиента (leads):
+[2026-03-29 14:38:14] - client_slug=artroyal_detailing
+[2026-03-29 14:38:14] - client_id=1
+[2026-03-29 14:38:14] - leads_json=/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm.json
+[2026-03-29 14:38:14] - leads_with_client_json=/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_with_client.json
+[2026-03-29 14:38:14] - leads_csv=/Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_flat_datalens.csv
+[2026-03-29 14:38:14] Режим лидов: full refresh (флаг --leads-full-refresh).
+[2026-03-29 14:38:14] Watermark в etl_sync_state (до запуска): 2026-03-29T09:06:31+00:00 — не используется для filter[updated_at], полная перезапись лидов в ClickHouse.
+[2026-03-29 14:38:14] Overlap (ETL_LEADS_OVERLAP_MINUTES): не применяется в этом режиме.
+[2026-03-29 14:38:14] === START: Лиды: шаг 1/4 — выгрузка лидов из amoCRM ===
+[2026-03-29 14:38:14] Команда: scripts/amocrm_export_leads.py --client-slug artroyal_detailing --out /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm.json
+[2026-03-29 14:39:15] [stdout] Готово. Режим: full. Лидов выгружено: 8029
+[2026-03-29 14:39:15] [stdout] Файл: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm.json
+[2026-03-29 14:39:15] ✔ Шаг 'Лиды: шаг 1/4 — выгрузка лидов из amoCRM' успешно выполнен за 61.1 c
+[2026-03-29 14:39:16] JSON 'add_leads_crm.json': найдено лидов = 8029
+[2026-03-29 14:39:16] === START: Лиды: шаг 2/4 — добавление client_id/client_slug в JSON ===
+[2026-03-29 14:39:16] Команда: scripts/add_client_id.py --client-slug artroyal_detailing --in /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm.json --out /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_with_client.json
+[2026-03-29 14:39:16] [stdout] OK. Файл сохранён: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_with_client.json
+[2026-03-29 14:39:16] [stdout] client_id = 1 | client_slug = artroyal_detailing
+[2026-03-29 14:39:16] [stdout] Записей обработано: 8029
+[2026-03-29 14:39:16] ✔ Шаг 'Лиды: шаг 2/4 — добавление client_id/client_slug в JSON' успешно выполнен за 0.4 c
+[2026-03-29 14:39:16] JSON 'add_leads_crm_with_client.json': найдено лидов = 8029
+[2026-03-29 14:39:16] === START: Лиды: шаг 3/4 — преобразование JSON в плоский CSV для отчётности ===
+[2026-03-29 14:39:16] Команда: scripts/leads_json_to_datalens_csv.py --client-slug artroyal_detailing --in /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_with_client.json --out /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_flat_datalens.csv
+[2026-03-29 14:39:16] [stdout] Готово. CSV сохранён: /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_flat_datalens.csv
+[2026-03-29 14:39:16] [stdout] Лидов выгружено: 8029
+[2026-03-29 14:39:16] ✔ Шаг 'Лиды: шаг 3/4 — преобразование JSON в плоский CSV для отчётности' успешно выполнен за 0.4 c
+[2026-03-29 14:39:16] CSV 'add_leads_crm_flat_datalens.csv': строк данных (без заголовка) = 8029
+[2026-03-29 14:39:16] === START: Лиды: шаг 4/4 — загрузка CSV в ClickHouse ===
+[2026-03-29 14:39:16] Команда: scripts/load_leads_csv_to_clickhouse.py --client-slug artroyal_detailing --csv-path /Users/kulsinbai/PycharmProjects/analytics/analytics-etl/var/data/artroyal_detailing/add_leads_crm_flat_datalens.csv
+[2026-03-29 14:39:19] [stdout] OK. Inserted rows: 8029
+[2026-03-29 14:39:19] [stdout] Client: 1 | slug: artroyal_detailing
+[2026-03-29 14:39:19] ✔ Шаг 'Лиды: шаг 4/4 — загрузка CSV в ClickHouse' успешно выполнен за 2.7 c
+[2026-03-29 14:39:19] Новый watermark (leads): 2026-03-29T09:06:31+00:00 — записан в etl_sync_state (max updated_dt по CSV).
+[2026-03-29 14:39:19] ##### Пайплайн лидов для artroyal_detailing (id=1) завершён успешно #####
+[2026-03-29 14:39:19] ✔ Пайплайн успешно завершён. Общее время выполнения: 64.8 c

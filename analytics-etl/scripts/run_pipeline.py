@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 import time
@@ -24,10 +25,26 @@ DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
 VAR_DIR = BASE_DIR / "var"
 
-# Назад от сохранённого watermark, чтобы перекрыть граничные обновления / задержки API.
-DEFAULT_LEADS_OVERLAP = timedelta(minutes=10)
-
 ENTITY_LEADS = "leads"
+
+
+def _leads_overlap_from_env() -> timedelta:
+    """
+    Назад от сохранённого watermark, чтобы перекрыть граничные обновления / задержки API.
+    Env: ETL_LEADS_OVERLAP_MINUTES (целое число минут). Если не задан — 10.
+    """
+    raw = (os.getenv("ETL_LEADS_OVERLAP_MINUTES") or "").strip()
+    if not raw:
+        return timedelta(minutes=10)
+    try:
+        n = int(raw)
+    except ValueError as e:
+        raise ValueError(
+            f"ETL_LEADS_OVERLAP_MINUTES должен быть целым числом минут, получено: {raw!r}"
+        ) from e
+    if n < 0:
+        raise ValueError("ETL_LEADS_OVERLAP_MINUTES не может быть отрицательным")
+    return timedelta(minutes=n)
 
 
 def max_updated_dt_from_csv(path: Path, log) -> datetime | None:
@@ -180,6 +197,10 @@ def run_leads_pipeline(client_slug: str, log, *, full_refresh_leads: bool = Fals
             save_last_error(client_id, ENTITY_LEADS, str(e))
         except Exception:
             pass
+        log(
+            "Leads: watermark_updated_at в etl_sync_state не менялся — пайплайн завершился ошибкой "
+            "(save_watermark вызывается только после успешной загрузки лидов в ClickHouse)."
+        )
         raise
 
 
@@ -206,31 +227,46 @@ def _run_leads_pipeline_impl(
     log(f"- leads_with_client_json={leads_with_client_json}")
     log(f"- leads_csv={leads_csv}")
 
+    overlap_td = _leads_overlap_from_env()
+    overlap_src = (os.getenv("ETL_LEADS_OVERLAP_MINUTES") or "").strip()
+    overlap_label = overlap_src if overlap_src else "10 (default)"
+
+    try:
+        wm_before = get_watermark(client_id, ENTITY_LEADS)
+    except Exception as e:
+        log(f"✖ Не удалось прочитать watermark из etl_sync_state: {e}")
+        raise
+
     incremental_ch = False
     since_dt: datetime | None = None
-    if not full_refresh_leads:
-        try:
-            wm = get_watermark(client_id, ENTITY_LEADS)
-        except Exception as e:
-            log(f"✖ Не удалось прочитать watermark из etl_sync_state: {e}")
-            raise
-        if wm is not None:
-            since_dt = wm - DEFAULT_LEADS_OVERLAP
-            incremental_ch = True
-            log(
-                f"Инкремент лидов: watermark={wm.isoformat()}, "
-                f"since_updated_at (с overlap {DEFAULT_LEADS_OVERLAP})={since_dt.isoformat()}"
-            )
-        else:
-            log("Watermark для лидов не задан — полная выгрузка из amoCRM (как раньше).")
+
+    if full_refresh_leads:
+        log("Режим лидов: full refresh (флаг --leads-full-refresh).")
+        log(
+            "Watermark в etl_sync_state (до запуска): "
+            + (wm_before.isoformat() if wm_before is not None else "отсутствует")
+            + " — не используется для filter[updated_at], полная перезапись лидов в ClickHouse."
+        )
+        log("Overlap (ETL_LEADS_OVERLAP_MINUTES): не применяется в этом режиме.")
+    elif wm_before is not None:
+        incremental_ch = True
+        since_dt = wm_before - overlap_td
+        since_str = since_dt.strftime("%Y-%m-%d %H:%M:%S")
+        log("Режим лидов: incremental.")
+        log(f"Watermark (до запуска): {wm_before.isoformat()}")
+        log(f"ETL_LEADS_OVERLAP_MINUTES (effective): {overlap_label} → overlap = {overlap_td}")
+        log(f"since_updated_at (нижняя граница API amoCRM, UTC): {since_str}")
     else:
-        log("Режим полной выгрузки лидов (--leads-full-refresh): filter[updated_at] не используется.")
+        log("Режим лидов: full export (watermark в etl_sync_state отсутствует).")
+        log("Watermark (до запуска): отсутствует — выгружаются все лиды, затем ClickHouse: полная перезапись по client_id.")
+        log(
+            f"ETL_LEADS_OVERLAP_MINUTES (effective): {overlap_label} — до появления watermark не используется."
+        )
 
     # 1) Выгрузка лидов из amoCRM
     export_cmd = ["scripts/amocrm_export_leads.py", "--client-slug", client_slug, "--out", str(leads_json)]
     if since_dt is not None:
-        since_str = since_dt.strftime("%Y-%m-%d %H:%M:%S")
-        export_cmd += ["--since-updated-at", since_str]
+        export_cmd += ["--since-updated-at", since_dt.strftime("%Y-%m-%d %H:%M:%S")]
     run_step(
         export_cmd,
         "Лиды: шаг 1/4 — выгрузка лидов из amoCRM",
@@ -292,8 +328,11 @@ def _run_leads_pipeline_impl(
 
     if incremental_ch and rows_csv == 0:
         log(
-            "Инкремент: в окне нет изменённых лидов — шаг ClickHouse пропущен, watermark не меняем."
+            "Инкремент: получено 0 строк в CSV — нет лидов, обновлённых после since_updated_at. "
+            "Шаг ClickHouse пропущен. Watermark (leads) не меняем — прежнее значение сохраняется."
         )
+        if wm_before is not None:
+            log(f"Watermark без изменений: {wm_before.isoformat()}")
         try:
             touch_last_success(client_id, ENTITY_LEADS)
         except Exception as e:
@@ -322,12 +361,14 @@ def _run_leads_pipeline_impl(
         if mx is not None:
             try:
                 save_watermark(client_id, ENTITY_LEADS, mx)
-                log(f"Watermark лидов обновлён: max(updated_dt)={mx.isoformat()}")
+                log(f"Новый watermark (leads): {mx.isoformat()} — записан в etl_sync_state (max updated_dt по CSV).")
             except Exception as e:
                 log(f"✖ Не удалось сохранить watermark в etl_sync_state: {e}")
                 raise
         else:
-            log("WARNING: не вычислен max(updated_dt) по CSV — watermark не обновлён.")
+            log(
+                "WARNING: не вычислен max(updated_dt) по CSV — watermark_updated_at в etl_sync_state не менялся."
+            )
 
     log(f"##### Пайплайн лидов для {client_slug} (id={client_id}) завершён успешно #####")
 

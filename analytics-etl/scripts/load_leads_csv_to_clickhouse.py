@@ -20,7 +20,7 @@ from scripts.clients_map import get_client_id
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 DEFAULT_LEADS_CSV = BASE_DIR / "data" / "add_leads_crm_flat_datalens.csv"
-DEFAULT_TABLE = "leads_fact"
+DEFAULT_TABLE = "leads_fact_v2"
 
 
 def parse_dt(series: pd.Series) -> pd.Series:
@@ -39,7 +39,7 @@ def parse_dt(series: pd.Series) -> pd.Series:
 
 def validate_csv(path: Path, *, allow_empty: bool = False) -> pd.DataFrame | None:
     """
-    Базовая валидация CSV перед удалением данных в ClickHouse.
+    Базовая валидация CSV перед загрузкой в ClickHouse.
     Проверяем:
     - файл существует;
     - не пустой;
@@ -137,7 +137,9 @@ def _assert_csv_matches_client(df: pd.DataFrame, client_id: int, client_slug: st
 
 
 def main():
-    p = argparse.ArgumentParser(description="Загрузка leads_fact в ClickHouse (safe multi-client).")
+    p = argparse.ArgumentParser(
+        description="Загрузка лидов в ClickHouse (append-only, ReplacingMergeTree по version)."
+    )
     p.add_argument(
         "--client-slug",
         required=True,
@@ -145,11 +147,11 @@ def main():
     )
     p.add_argument("--csv-path", default=str(DEFAULT_LEADS_CSV), help="Путь к CSV add_leads_crm_flat_datalens.csv")
     p.add_argument("--ch-table", default=DEFAULT_TABLE, help="Имя таблицы ClickHouse (без БД)")
-    p.add_argument("--dry-run", action="store_true", help="Не выполнять DELETE/INSERT, только проверки и план действий")
+    p.add_argument("--dry-run", action="store_true", help="Не выполнять INSERT, только проверки и план действий")
     p.add_argument(
         "--incremental",
         action="store_true",
-        help="Инкремент: DELETE только по lead_id из CSV (этот client_id), затем INSERT; без полного DELETE по client_id.",
+        help="Режим инкрементального CSV (как в пайплайне): пустой CSV допустим, загрузка пропускается.",
     )
     args = p.parse_args()
 
@@ -167,7 +169,7 @@ def main():
         return
 
     if incremental and df.empty:
-        print("OK. Incremental: CSV без строк — DELETE/INSERT не выполняются.")
+        print("OK. Incremental: CSV без строк — INSERT не выполняется.")
         print("Client:", client_id, "| slug:", client_slug)
         return
 
@@ -177,33 +179,14 @@ def main():
     table = args.ch_table
     full_table = f"{db}.{table}"
 
-    # 1) перезаливка данных клиента (тестовый режим)
+    # 1) dry-run: только проверки и вывод плана (без INSERT)
     if args.dry_run:
         print("DRY RUN")
         print("Target table:", full_table)
         print("Client:", client_slug, "id=", client_id)
         print("CSV:", leads_csv, "rows=", len(df))
-        if incremental:
-            print(
-                "Planned:",
-                f"DELETE WHERE client_id = {client_id} AND lead_id IN (... из CSV)",
-                "+ INSERT rows",
-            )
-        else:
-            print("Planned:", f"DELETE WHERE client_id = {client_id}", "+ INSERT rows")
+        print("Planned: INSERT rows only (append-only, version = updated_at или etl_loaded_at)")
         return
-
-    if incremental:
-        out_ids = pd.to_numeric(df.get("id"), errors="coerce")
-        lead_ids = [int(x) for x in out_ids.dropna().unique().tolist() if int(x) > 0]
-        if lead_ids:
-            ids_csv = ",".join(str(i) for i in lead_ids)
-            client.command(
-                f"ALTER TABLE {full_table} DELETE WHERE client_id = {client_id} AND lead_id IN ({ids_csv})"
-            )
-        # если lead_ids пуст — нечего удалять и вставлять (не должно при непустом df)
-    else:
-        client.command(f"ALTER TABLE {full_table} DELETE WHERE client_id = {client_id}")
 
     etl_loaded_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -256,6 +239,8 @@ def main():
             out[col] = pd.Series([None] * len(out), dtype="string")
 
     out["etl_loaded_at"] = etl_loaded_at
+    _etl_ts = pd.Timestamp(etl_loaded_at)
+    out["version"] = out["updated_at"].where(out["updated_at"].notna(), _etl_ts)
 
     # 3) базовые фильтры качества
     out = out[out["lead_id"] > 0].copy()

@@ -13,6 +13,10 @@
   );
 
 watermark_updated_at — верхняя граница updated_at (amoCRM) по реально загруженным сущностям, UTC.
+
+Поведение при ошибках: save_watermark вызывается только после успешной загрузки в ClickHouse;
+save_last_error / сбой пайплайна не изменяют watermark_updated_at (колонка не трогается
+в save_last_error — обновляется только last_error).
 """
 
 from __future__ import annotations
@@ -67,6 +71,9 @@ def save_watermark(
 ) -> None:
     """
     Сохраняет watermark и отмечает успешный прогон (last_success_at, last_error = NULL).
+
+    Вызывать только после успешной обработки батча (например загрузки в ClickHouse);
+    при исключении в пайплайне до этого шага watermark не продвигают.
     watermark_updated_at интерпретируется как UTC, если naive.
     """
     cid = int(client_id)
